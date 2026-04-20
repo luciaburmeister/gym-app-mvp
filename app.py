@@ -123,7 +123,7 @@ def calculate_angles(kp):
 
 def extract_features(kp):
     angles = calculate_angles(kp)
-    return (
+    base = (
         [angles["left_knee_angle"],  angles["right_knee_angle"],
          angles["left_hip_angle"],   angles["right_hip_angle"],
          angles["left_elbow_angle"], angles["right_elbow_angle"],
@@ -131,6 +131,18 @@ def extract_features(kp):
         [float(kp[i][0]) for i in range(17)] +
         [float(kp[i][1]) for i in range(17)]
     )
+    asymmetry = [
+        abs(angles["left_knee_angle"]     - angles["right_knee_angle"]),
+        abs(angles["left_hip_angle"]      - angles["right_hip_angle"]),
+        abs(angles["left_shoulder_angle"] - angles["right_shoulder_angle"]),
+        abs(angles["left_elbow_angle"]    - angles["right_elbow_angle"]),
+        abs(float(kp[11][0]) - float(kp[12][0])),
+        abs(float(kp[13][0]) - float(kp[14][0])),
+        abs(float(kp[15][0]) - float(kp[16][0])),
+        abs(float(kp[13][1]) - float(kp[14][1])),
+        abs(float(kp[15][1]) - float(kp[16][1])),
+    ]
+    return base + asymmetry
 
 
 # ─────────────────────────────────────────────
@@ -336,4 +348,4 @@ if __name__ == "__main__":
     print("\n Starting web server...")
     print(" Open your browser at:  http://localhost:5000\n")
 
-    app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
+    app.run(host="0.0.0.0", port=8080, debug=False, threaded=True)
