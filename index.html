@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GymCoach</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Variables ── */
+    :root {
+      --bg:           #080808;
+      --surface:      #111111;
+      --border:       #1e1e1e;
+      --accent-good:  #c6f135;
+      --accent-bad:   #ff4f4f;
+      --accent-detect:#f5a623;
+      --text:         #ffffff;
+      --muted:        #555555;
+      --muted-light:  #888888;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Barlow', sans-serif;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Top bar ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 32px;
+      height: 64px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      background: var(--surface);
+    }
+
+    .logo {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 28px;
+      letter-spacing: 4px;
+      color: var(--accent-good);
+    }
+
+    .logo span {
+      color: var(--text);
+    }
+
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      color: var(--muted-light);
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background 0.4s;
+    }
+
+    .status-dot.waiting   { background: var(--muted); }
+    .status-dot.detecting { background: var(--accent-detect); animation: pulse-detect 1s infinite; }
+    .status-dot.active    { background: var(--accent-good); }
+
+    @keyframes pulse-detect {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    /* ── Main layout ── */
+    .main {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Video area ── */
+    .video-area {
+      position: relative;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .video-area img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    /* Waiting overlay */
+    .waiting-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      background: rgba(8,8,8,0.85);
+      transition: opacity 0.5s;
+    }
+
+    .waiting-overlay.hidden { opacity: 0; pointer-events: none; }
+
+    .waiting-icon {
+      width: 64px;
+      height: 64px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent-good);
+      border-radius: 50%;
+      animation: spin 2s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .waiting-text {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 22px;
+      letter-spacing: 4px;
+      color: var(--muted-light);
+    }
+
+    /* Detection progress bar */
+    .detect-bar-wrap {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: rgba(255,255,255,0.05);
+      transition: opacity 0.3s;
+    }
+
+    .detect-bar-wrap.hidden { opacity: 0; }
+
+    .detect-bar {
+      height: 100%;
+      background: var(--accent-detect);
+      width: 0%;
+      transition: width 0.15s ease-out;
+    }
+
+    /* ── Right panel ── */
+    .panel {
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 28px 24px;
+      gap: 24px;
+      overflow-y: auto;
+    }
+
+    .panel-block {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .panel-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 3px;
+      color: var(--muted);
+    }
+
+    /* Exercise name */
+    .exercise-name {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 64px;
+      line-height: 1;
+      color: var(--text);
+      transition: opacity 0.4s;
+      min-height: 68px;
+    }
+
+    .exercise-name.empty { opacity: 0.12; }
+
+    /* Confidence meter */
+    .confidence-track {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .confidence-fill {
+      height: 100%;
+      border-radius: 3px;
+      background: var(--accent-good);
+      width: 0%;
+      transition: width 0.3s ease-out, background 0.4s;
+    }
+
+    .confidence-fill.bad { background: var(--accent-bad); }
+
+    .confidence-number {
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      color: var(--muted-light);
+    }
+
+    /* Feedback card */
+    .feedback-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      min-height: 110px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 10px;
+      transition: border-color 0.4s;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .feedback-card::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: var(--muted);
+      transition: background 0.4s;
+    }
+
+    .feedback-card.good::before  { background: var(--accent-good); }
+    .feedback-card.bad::before   { background: var(--accent-bad); }
+
+    .feedback-card.good { border-color: rgba(198,241,53,0.2); }
+    .feedback-card.bad  { border-color: rgba(255,79,79,0.2); }
+
+    .feedback-tag {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+
+    .feedback-card.good .feedback-tag { color: var(--accent-good); }
+    .feedback-card.bad  .feedback-tag { color: var(--accent-bad); }
+    .feedback-card      .feedback-tag { color: var(--muted); }
+
+    .feedback-message {
+      font-size: 16px;
+      font-weight: 600;
+      line-height: 1.4;
+      color: var(--text);
+    }
+
+    .feedback-message.empty {
+      color: var(--muted);
+      font-weight: 400;
+      font-size: 14px;
+    }
+
+    /* Detection state text */
+    .detecting-text {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--accent-detect);
+      display: none;
+    }
+
+    .detecting-text.visible { display: block; }
+
+    /* Divider */
+    .divider {
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* Instructions */
+    .instructions {
+      margin-top: auto;
+    }
+
+    .instruction-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .instruction-item:last-child { border-bottom: none; }
+
+    .instruction-key {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      background: var(--border);
+      padding: 2px 7px;
+      border-radius: 4px;
+      color: var(--muted-light);
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .instruction-desc {
+      font-size: 13px;
+      color: var(--muted-light);
+      line-height: 1.4;
+    }
+
+    /* Flash animation on feedback change */
+    @keyframes flash-good {
+      0%   { background: rgba(198,241,53,0.08); }
+      100% { background: transparent; }
+    }
+
+    @keyframes flash-bad {
+      0%   { background: rgba(255,79,79,0.08); }
+      100% { background: transparent; }
+    }
+
+    .feedback-card.flash-good { animation: flash-good 0.6s ease-out; }
+    .feedback-card.flash-bad  { animation: flash-bad  0.6s ease-out; }
+  </style>
+</head>
+<body>
+
+  <!-- ── Header ── -->
+  <header>
+    <div class="logo">Gym<span>Coach</span></div>
+    <div class="status-pill">
+      <div class="status-dot waiting" id="statusDot"></div>
+      <span id="statusText">Waiting for athlete</span>
+    </div>
+  </header>
+
+  <!-- ── Main ── -->
+  <div class="main">
+
+    <!-- Video feed -->
+    <div class="video-area">
+      <img src="/video_feed" alt="Live feed" />
+
+      <div class="waiting-overlay" id="waitingOverlay">
+        <div class="waiting-icon"></div>
+        <div class="waiting-text">Step into frame</div>
+      </div>
+
+      <div class="detect-bar-wrap hidden" id="detectBarWrap">
+        <div class="detect-bar" id="detectBar"></div>
+      </div>
+    </div>
+
+    <!-- Right panel -->
+    <div class="panel">
+
+      <!-- Exercise -->
+      <div class="panel-block">
+        <div class="panel-label">Exercise</div>
+        <div class="exercise-name empty" id="exerciseName">—</div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Confidence -->
+      <div class="panel-block">
+        <div class="panel-label">Model Confidence</div>
+        <div class="confidence-track">
+          <div class="confidence-fill" id="confidenceFill"></div>
+        </div>
+        <div class="confidence-number" id="confidenceNumber">—</div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Feedback -->
+      <div class="panel-block">
+        <div class="panel-label">Live Feedback</div>
+
+        <div class="detecting-text" id="detectingText">
+          Identifying exercise...
+        </div>
+
+        <div class="feedback-card" id="feedbackCard">
+          <div class="feedback-tag" id="feedbackTag">—</div>
+          <div class="feedback-message empty" id="feedbackMessage">
+            Stand in front of the camera to begin
+          </div>
+        </div>
+      </div>
+
+      <!-- Instructions -->
+      <div class="instructions">
+        <div class="divider" style="margin-bottom:16px"></div>
+        <div class="instruction-item">
+          <span class="instruction-key">Auto</span>
+          <span class="instruction-desc">Exercise detected automatically from your pose</span>
+        </div>
+        <div class="instruction-item">
+          <span class="instruction-key">R</span>
+          <span class="instruction-desc">Reset detection if it gets stuck</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    const statusDot       = document.getElementById('statusDot');
+    const statusText      = document.getElementById('statusText');
+    const waitingOverlay  = document.getElementById('waitingOverlay');
+    const detectBarWrap   = document.getElementById('detectBarWrap');
+    const detectBar       = document.getElementById('detectBar');
+    const exerciseName    = document.getElementById('exerciseName');
+    const confidenceFill  = document.getElementById('confidenceFill');
+    const confidenceNumber= document.getElementById('confidenceNumber');
+    const detectingText   = document.getElementById('detectingText');
+    const feedbackCard    = document.getElementById('feedbackCard');
+    const feedbackTag     = document.getElementById('feedbackTag');
+    const feedbackMessage = document.getElementById('feedbackMessage');
+
+    const EXERCISE_NAMES = {
+      squat:  'Squat',
+      pushup: 'Push-Up',
+      lunge:  'Lunge',
+      plank:  'Plank',
+    };
+
+    let prevFeedbackKey = null;
+
+    async function poll() {
+      try {
+        const res  = await fetch('/status');
+        const data = await res.json();
+        update(data);
+      } catch (e) {
+        // server not ready yet
+      }
+    }
+
+    function update(data) {
+      const { status, exercise, feedback_key, feedback_message,
+              form_confidence, detection_pct, is_good_form } = data;
+
+      // ── Status dot & text ──
+      statusDot.className = `status-dot ${status}`;
+
+      if (status === 'waiting') {
+        statusText.textContent = 'Waiting for athlete';
+      } else if (status === 'detecting') {
+        statusText.textContent = 'Identifying exercise…';
+      } else {
+        statusText.textContent = 'Live — analysing form';
+      }
+
+      // ── Waiting overlay ──
+      waitingOverlay.classList.toggle('hidden', status !== 'waiting');
+
+      // ── Detection bar ──
+      detectBarWrap.classList.toggle('hidden', status !== 'detecting');
+      if (status === 'detecting') {
+        detectBar.style.width = `${Math.round(detection_pct * 100)}%`;
+      }
+
+      // ── Exercise name ──
+      const exLabel = exercise ? (EXERCISE_NAMES[exercise] || exercise) : '—';
+      exerciseName.textContent = exLabel;
+      exerciseName.classList.toggle('empty', !exercise);
+
+      // ── Confidence ──
+      if (status === 'active' && form_confidence > 0) {
+        const pct = Math.round(form_confidence * 100);
+        confidenceFill.style.width = `${pct}%`;
+        confidenceFill.classList.toggle('bad', !is_good_form);
+        confidenceNumber.textContent = `${pct}%`;
+      } else {
+        confidenceFill.style.width = '0%';
+        confidenceNumber.textContent = '—';
+      }
+
+      // ── Detecting text ──
+      detectingText.classList.toggle('visible', status === 'detecting');
+
+      // ── Feedback card ──
+      if (status === 'active' && feedback_message) {
+        feedbackCard.classList.toggle('good', is_good_form);
+        feedbackCard.classList.toggle('bad', !is_good_form);
+
+        feedbackTag.textContent     = is_good_form ? '✓ Correct' : '⚠ Correction';
+        feedbackMessage.textContent = feedback_message;
+        feedbackMessage.classList.remove('empty');
+
+        // Flash animation on change
+        if (feedback_key !== prevFeedbackKey) {
+          feedbackCard.classList.remove('flash-good', 'flash-bad');
+          void feedbackCard.offsetWidth; // reflow
+          feedbackCard.classList.add(is_good_form ? 'flash-good' : 'flash-bad');
+          prevFeedbackKey = feedback_key;
+        }
+
+      } else if (status === 'detecting') {
+        feedbackCard.className    = 'feedback-card';
+        feedbackTag.textContent   = '—';
+        feedbackMessage.textContent = 'Hold your position…';
+        feedbackMessage.classList.add('empty');
+
+      } else {
+        feedbackCard.className    = 'feedback-card';
+        feedbackTag.textContent   = '—';
+        feedbackMessage.textContent = 'Stand in front of the camera to begin';
+        feedbackMessage.classList.add('empty');
+        prevFeedbackKey = null;
+      }
+    }
+
+    // Poll every 300ms
+    setInterval(poll, 300);
+    poll();
+  </script>
+
+</body>
+</html>

@@ -1,0 +1,10 @@
+raw_clips/
+processed/
+models/
+*.pkl
+*.pt
+*.mp4
+*.mov
+venv/
+__pycache__/
+.DS_Store
