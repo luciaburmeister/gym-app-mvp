@@ -8,8 +8,14 @@ performing, then gives real-time form feedback using the matching
 trained classifier.
 
 Controls:
-    Q  →  Quit
-    R  →  Reset (if detection gets stuck)
+    Q        →  Quit
+    R        →  Reset (if detection gets stuck)
+    D        →  Toggle developer panel (exercise detection confidence bar)
+    1        →  Force: Squat
+    2        →  Force: Push-Up
+    3        →  Force: Lunge
+    4        →  Force: Plank
+    0        →  Clear forced exercise (go back to auto-detection)
 
 Usage:
     python live.py
@@ -49,6 +55,14 @@ LEFT_WRIST     = 9;  RIGHT_WRIST    = 10
 LEFT_HIP       = 11; RIGHT_HIP      = 12
 LEFT_KNEE      = 13; RIGHT_KNEE     = 14
 LEFT_ANKLE     = 15; RIGHT_ANKLE    = 16
+
+# Exercise key mapping for force-override (keys 1–4)
+FORCE_EXERCISE_KEYS = {
+    ord("1"): "squat",
+    ord("2"): "pushup",
+    ord("3"): "lunge",
+    ord("4"): "plank",
+}
 
 EXERCISE_DISPLAY = {
     "squat":      "Squat",
@@ -160,27 +174,44 @@ def load_models():
 
 
 # ─────────────────────────────────────────────
-#  DRAWING
+#  DRAWING HELPERS
 # ─────────────────────────────────────────────
+
+def draw_confidence_bar(frame, x, y, width, height, value, color, bg_color=(60, 60, 60)):
+    """Draw a filled confidence bar from (x,y) with the given dimensions."""
+    cv2.rectangle(frame, (x, y), (x + width, y + height), bg_color, -1)
+    filled = int(width * max(0.0, min(1.0, value)))
+    if filled > 0:
+        cv2.rectangle(frame, (x, y), (x + filled, y + height), color, -1)
+
 
 def draw_ui(frame, state):
     h, w = frame.shape[:2]
 
+    # ── Top bar background ──
     overlay = frame.copy()
     cv2.rectangle(overlay, (0, 0), (w, 75), (15, 15, 15), -1)
     cv2.addWeighted(overlay, 0.65, frame, 0.35, 0, frame)
 
+    # ── Bottom bar background ──
+    # Taller when feedback confidence bar is shown
+    bottom_bar_h = 100 if (state["confirmed_exercise"] and not state["no_person"]) else 80
     overlay = frame.copy()
-    cv2.rectangle(overlay, (0, h - 80), (w, h), (15, 15, 15), -1)
+    cv2.rectangle(overlay, (0, h - bottom_bar_h), (w, h), (15, 15, 15), -1)
     cv2.addWeighted(overlay, 0.65, frame, 0.35, 0, frame)
 
-    no_person       = state["no_person"]
-    exercise        = state["confirmed_exercise"]
-    detecting       = state["detecting"]
-    detection_pct   = state["detection_pct"]
-    feedback_text   = state["feedback_text"]
-    feedback_color  = state["feedback_color"]
-    form_confidence = state["form_confidence"]
+    no_person          = state["no_person"]
+    exercise           = state["confirmed_exercise"]
+    detecting          = state["detecting"]
+    detection_pct      = state["detection_pct"]
+    feedback_text      = state["feedback_text"]
+    feedback_color     = state["feedback_color"]
+    form_confidence    = state["form_confidence"]
+    feedback_confidence = state["feedback_confidence"]
+    show_dev_panel     = state["show_dev_panel"]
+    forced_exercise    = state["forced_exercise"]
+
+    # ── TOP BAR ──
 
     if no_person:
         cv2.putText(frame, "Step into frame to begin",
@@ -191,34 +222,64 @@ def draw_ui(frame, state):
         cv2.putText(frame, label,
                     (20, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (200, 180, 60), 2)
 
+        # Detection progress bar (only shown while detecting — this is not the
+        # developer confidence bar, it's the "scanning" indicator every user sees)
         bx, by, bw, bh = 20, 58, 300, 8
-        cv2.rectangle(frame, (bx, by), (bx + bw, by + bh), (60, 60, 60), -1)
-        cv2.rectangle(frame, (bx, by),
-                      (bx + int(bw * detection_pct), by + bh),
-                      (200, 180, 60), -1)
+        draw_confidence_bar(frame, bx, by, bw, bh, detection_pct, (200, 180, 60))
 
     else:
         ex_label = EXERCISE_DISPLAY.get(exercise, exercise)
-        cv2.putText(frame, ex_label,
-                    (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 2)
 
-        if form_confidence > 0:
-            conf_text = f"{int(form_confidence * 100)}%"
-            ts = cv2.getTextSize(conf_text, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)[0]
-            cv2.putText(frame, conf_text,
-                        (w - ts[0] - 20, 48),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (180, 180, 180), 2)
+        # If exercise was forced, show a small "MANUAL" badge next to the name
+        if forced_exercise:
+            cv2.putText(frame, ex_label,
+                        (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 200, 60), 2)
+            badge = "MANUAL"
+            ts = cv2.getTextSize(badge, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
+            bx = 20 + cv2.getTextSize(ex_label, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 2)[0][0] + 10
+            cv2.putText(frame, badge, (bx, 46),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 200, 60), 1)
+        else:
+            cv2.putText(frame, ex_label, 
+                        (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 2)
+
+        # ── DEVELOPER PANEL (toggle with D) ──
+        # Shows the exercise detector's confidence bar — hidden by default
+        if show_dev_panel and form_confidence > 0:
+            dev_label = f"DEV  detector conf: {int(form_confidence * 100)}%"
+            cv2.putText(frame, dev_label,
+                        (w - 280, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 160, 0), 1)
+            draw_confidence_bar(frame, w - 280, 38, 260, 7,
+                                form_confidence, (255, 160, 0))
+
+    # ── BOTTOM BAR: feedback text + feedback confidence bar ──
 
     if feedback_text and not no_person and not detecting:
+        # Feedback text
         cv2.putText(frame, feedback_text,
-                    (20, h - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.9,
-                    feedback_color, 2)
+                    (20, h - bottom_bar_h + 28),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, feedback_color, 2)
 
-    hint = "R=Reset  Q=Quit"
-    ts   = cv2.getTextSize(hint, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)[0]
-    cv2.putText(frame, hint,
-                (w - ts[0] - 10, h - 8),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (100, 100, 100), 1)
+        # Feedback confidence bar + label
+        if feedback_confidence > 0:
+            pct_label = f"confidence  {int(feedback_confidence * 100)}%"
+            cv2.putText(frame, pct_label,
+                        (20, h - bottom_bar_h + 52),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, (160, 160, 160), 1)
+            draw_confidence_bar(frame, 20, h - bottom_bar_h + 60,
+                                220, 7, feedback_confidence, feedback_color)
+
+    # ── Exercise force buttons hint (always visible at bottom right) ──
+    hint_lines = [
+        "1=Squat  2=Push-Up  3=Lunge  4=Plank  0=Auto",
+        "D=Dev panel   R=Reset   Q=Quit",
+    ]
+    for i, line in enumerate(hint_lines):
+        ts = cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, 0.40, 1)[0]
+        cv2.putText(frame, line,
+                    (w - ts[0] - 10, h - 22 + i * 14),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.40, (100, 100, 100), 1)
 
     return frame
 
@@ -234,7 +295,12 @@ def run():
     print("\n Loading YOLOv8-pose...")
     yolo = YOLO(MODEL_WEIGHTS)
     print(" Ready!\n")
-    print(" Opening webcam — stand in frame to begin. Q=Quit  R=Reset\n")
+    print(" Controls:")
+    print("   1/2/3/4  →  Force exercise (Squat / Push-Up / Lunge / Plank)")
+    print("   0        →  Back to auto-detection")
+    print("   D        →  Toggle developer confidence panel")
+    print("   R        →  Reset")
+    print("   Q        →  Quit\n")
 
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
@@ -243,11 +309,14 @@ def run():
 
     detection_buffer   = deque(maxlen=DETECTION_WINDOW)
     feedback_buffer    = deque(maxlen=FEEDBACK_WINDOW)
-    confirmed_exercise = None
-    feedback_text      = ""
-    feedback_color     = (200, 200, 200)
-    form_confidence    = 0.0
-    detector           = models["detector"]
+    confirmed_exercise  = None
+    forced_exercise     = None   # set when user presses 1–4
+    feedback_text       = ""
+    feedback_color      = (200, 200, 200)
+    form_confidence     = 0.0
+    feedback_confidence = 0.0   # confidence of the current feedback label
+    show_dev_panel      = False  # toggled with D
+    detector            = models["detector"]
 
     while True:
         ret, frame = cap.read()
@@ -257,16 +326,49 @@ def run():
         frame = cv2.flip(frame, 1)
 
         key = cv2.waitKey(1) & 0xFF
+
+        # ── Quit ──
         if key == ord("q") or key == ord("Q"):
             break
+
+        # ── Reset ──
         if key == ord("r") or key == ord("R"):
             detection_buffer.clear()
             feedback_buffer.clear()
-            confirmed_exercise = None
-            feedback_text      = ""
-            form_confidence    = 0.0
-            print(" Reset.")
+            confirmed_exercise  = None
+            forced_exercise     = None
+            feedback_text       = ""
+            form_confidence     = 0.0
+            feedback_confidence = 0.0
+            print(" Reset — back to auto-detection.")
 
+        # ── Toggle developer panel (exercise detection confidence) ──
+        if key == ord("d") or key == ord("D"):
+            show_dev_panel = not show_dev_panel
+            print(f" Developer panel {'ON' if show_dev_panel else 'OFF'}.")
+
+        # ── Force exercise override (keys 1–4) ──
+        if key in FORCE_EXERCISE_KEYS:
+            forced_exercise    = FORCE_EXERCISE_KEYS[key]
+            confirmed_exercise = forced_exercise
+            detection_buffer.clear()
+            feedback_buffer.clear()
+            feedback_text       = ""
+            feedback_confidence = 0.0
+            print(f" Forced exercise: {EXERCISE_DISPLAY.get(forced_exercise, forced_exercise)}")
+
+        # ── Clear force override (key 0) ──
+        if key == ord("0"):
+            forced_exercise    = None
+            confirmed_exercise = None
+            detection_buffer.clear()
+            feedback_buffer.clear()
+            feedback_text       = ""
+            form_confidence     = 0.0
+            feedback_confidence = 0.0
+            print(" Cleared forced exercise — back to auto-detection.")
+
+        # ── YOLO inference ──
         results   = yolo(frame, verbose=False)
         no_person = True
 
@@ -286,12 +388,16 @@ def run():
                     features  = extract_features(kp)
 
                     # ── Step 1: Detect the exercise ──
-                    if confirmed_exercise is None:
+                    # Skip auto-detection if the user has forced an exercise
+                    if confirmed_exercise is None and forced_exercise is None:
                         det_proba = detector["model"].predict_proba([features])[0]
                         det_label = detector["encoder"].inverse_transform(
                             [det_proba.argmax()]
                         )[0]
                         detection_buffer.append(det_label)
+
+                        # Store detection confidence for dev panel
+                        form_confidence = det_proba.max()
 
                         if len(detection_buffer) == DETECTION_WINDOW:
                             counts   = {ex: detection_buffer.count(ex)
@@ -312,7 +418,13 @@ def run():
                         form_data = models[confirmed_exercise]
                         proba     = form_data["model"].predict_proba([features])[0]
                         pred_idx  = proba.argmax()
-                        form_confidence = proba[pred_idx]
+
+                        # form_confidence is now used only for the dev panel
+                        form_confidence     = proba[pred_idx]
+                        # feedback_confidence is the confidence shown to users
+                        # in the bottom bar — we store the raw per-frame value
+                        # and show it smoothed via the buffer
+                        feedback_confidence = proba[pred_idx]
 
                         feedback_buffer.append(pred_idx)
                         smoothed = max(set(feedback_buffer),
@@ -325,13 +437,21 @@ def run():
                             feedback_text  = label.replace("_", " ").title()
                             feedback_color = (60, 120, 255)
 
-        # Reset if person leaves the frame
+        # ── Reset if person leaves frame (but keep forced exercise in memory) ──
         if no_person and confirmed_exercise is not None:
-            confirmed_exercise = None
-            detection_buffer.clear()
+            confirmed_exercise  = None
+            # If exercise was forced, we'll restore it when the person comes back
+            # only reset the auto-detected one
+            if not forced_exercise:
+                detection_buffer.clear()
             feedback_buffer.clear()
-            feedback_text   = ""
-            form_confidence = 0.0
+            feedback_text       = ""
+            form_confidence     = 0.0
+            feedback_confidence = 0.0
+
+        # If person comes back and exercise was forced, restore it immediately
+        if not no_person and forced_exercise and confirmed_exercise is None:
+            confirmed_exercise = forced_exercise
 
         detecting     = (confirmed_exercise is None and
                          not no_person and
@@ -339,13 +459,16 @@ def run():
         detection_pct = len(detection_buffer) / DETECTION_WINDOW if detecting else 0.0
 
         state = {
-            "no_person":          no_person,
-            "detecting":          detecting,
-            "detection_pct":      detection_pct,
-            "confirmed_exercise": confirmed_exercise,
-            "feedback_text":      feedback_text,
-            "feedback_color":     feedback_color,
-            "form_confidence":    form_confidence,
+            "no_person":           no_person,
+            "detecting":           detecting,
+            "detection_pct":       detection_pct,
+            "confirmed_exercise":  confirmed_exercise,
+            "feedback_text":       feedback_text,
+            "feedback_color":      feedback_color,
+            "form_confidence":     form_confidence,
+            "feedback_confidence": feedback_confidence,
+            "show_dev_panel":      show_dev_panel,
+            "forced_exercise":     forced_exercise,
         }
 
         frame = draw_ui(frame, state)

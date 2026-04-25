@@ -8,10 +8,11 @@ Flask server that:
      (YOLOv8-pose → exercise detection → form classification)
   2. Streams the annotated video feed to the browser via MJPEG
   3. Exposes a /status endpoint the browser polls for feedback data
+  4. Exposes a /force_exercise endpoint so the UI can override detection
 
 Usage:
     python app.py
-Then open:  http://localhost:5000
+Then open:  http://localhost:8080
 """
 
 import cv2
@@ -20,9 +21,12 @@ import os
 import pickle
 import threading
 import time
+import warnings
 from collections import deque
 
-from flask import Flask, Response, jsonify, render_template
+warnings.filterwarnings("ignore", category=UserWarning)
+
+from flask import Flask, Response, jsonify, render_template, request
 from ultralytics import YOLO
 
 
@@ -74,24 +78,25 @@ FEEDBACK_MESSAGES = {
 
 
 # ─────────────────────────────────────────────
-#  GLOBAL STATE (shared between AI thread + Flask)
+#  GLOBAL STATE
 # ─────────────────────────────────────────────
 
 state_lock = threading.Lock()
 
 state = {
-    "status":           "waiting",   # waiting | detecting | active
-    "exercise":         None,
-    "feedback_key":     None,
-    "feedback_message": "",
-    "form_confidence":  0.0,
-    "detection_pct":    0.0,
-    "is_good_form":     False,
+    "status":              "waiting",
+    "exercise":            None,
+    "feedback_key":        None,
+    "feedback_message":    "",
+    "form_confidence":     0.0,   # exercise detector confidence (dev panel)
+    "feedback_confidence": 0.0,   # form classifier confidence (shown to users)
+    "detection_pct":       0.0,
+    "is_good_form":        False,
+    "forced_exercise":     None,  # set when user manually picks an exercise
 }
 
-# The latest JPEG frame to stream to the browser
-frame_lock    = threading.Lock()
-latest_frame  = None
+frame_lock   = threading.Lock()
+latest_frame = None
 
 
 # ─────────────────────────────────────────────
@@ -121,12 +126,13 @@ def calculate_angles(kp):
     }
 
 
-def extract_features(kp):
+def extract_features_detector(kp):
+    """51 features — used by the exercise detector (includes asymmetry)."""
     angles = calculate_angles(kp)
     base = (
-        [angles["left_knee_angle"],  angles["right_knee_angle"],
-         angles["left_hip_angle"],   angles["right_hip_angle"],
-         angles["left_elbow_angle"], angles["right_elbow_angle"],
+        [angles["left_knee_angle"],     angles["right_knee_angle"],
+         angles["left_hip_angle"],      angles["right_hip_angle"],
+         angles["left_elbow_angle"],    angles["right_elbow_angle"],
          angles["left_shoulder_angle"], angles["right_shoulder_angle"]] +
         [float(kp[i][0]) for i in range(17)] +
         [float(kp[i][1]) for i in range(17)]
@@ -143,6 +149,19 @@ def extract_features(kp):
         abs(float(kp[15][1]) - float(kp[16][1])),
     ]
     return base + asymmetry
+
+
+def extract_features_form(kp):
+    """42 features — used by the per-exercise form classifiers."""
+    angles = calculate_angles(kp)
+    return (
+        [angles["left_knee_angle"],     angles["right_knee_angle"],
+         angles["left_hip_angle"],      angles["right_hip_angle"],
+         angles["left_elbow_angle"],    angles["right_elbow_angle"],
+         angles["left_shoulder_angle"], angles["right_shoulder_angle"]] +
+        [float(kp[i][0]) for i in range(17)] +
+        [float(kp[i][1]) for i in range(17)]
+    )
 
 
 # ─────────────────────────────────────────────
@@ -191,7 +210,7 @@ def ai_loop(models):
     confirmed_exercise = None
     detector           = models["detector"]
 
-    print("\n  Webcam open — visit http://localhost:5000\n")
+    print("\n  Webcam open — visit http://localhost:8080\n")
 
     while True:
         ret, frame = cap.read()
@@ -199,8 +218,25 @@ def ai_loop(models):
             time.sleep(0.05)
             continue
 
-        frame    = cv2.flip(frame, 1)
-        results  = yolo(frame, verbose=False)
+        frame = cv2.flip(frame, 1)
+
+        # Read forced_exercise once per frame so it's consistent
+        with state_lock:
+            forced_exercise = state["forced_exercise"]
+
+        # If user just forced an exercise, sync confirmed_exercise
+        if forced_exercise is not None and confirmed_exercise != forced_exercise:
+            confirmed_exercise = forced_exercise
+            detection_buffer.clear()
+            feedback_buffer.clear()
+
+        # If user cleared the force, reset to auto-detection
+        if forced_exercise is None and confirmed_exercise is not None:
+            # Only reset if it was previously forced (detected exercises
+            # are managed below). We track this by checking state directly.
+            pass  # handled below in the no_person / active logic
+
+        results   = yolo(frame, verbose=False)
         no_person = True
 
         if results and results[0].keypoints is not None:
@@ -215,14 +251,13 @@ def ai_loop(models):
 
                 if hip_visible:
                     no_person = False
+                    frame     = results[0].plot(img=frame)
+                    feat_det  = extract_features_detector(kp)
+                    feat_form = extract_features_form(kp)
 
-                    # Draw skeleton on frame
-                    frame    = results[0].plot(img=frame)
-                    features = extract_features(kp)
-
-                    # ── Exercise detection ──
-                    if confirmed_exercise is None:
-                        det_proba = detector["model"].predict_proba([features])[0]
+                    # ── Exercise detection (skip if user forced an exercise) ──
+                    if confirmed_exercise is None and forced_exercise is None:
+                        det_proba = detector["model"].predict_proba([feat_det])[0]
                         det_label = detector["encoder"].inverse_transform(
                             [det_proba.argmax()]
                         )[0]
@@ -250,9 +285,9 @@ def ai_loop(models):
 
                     # ── Form feedback ──
                     elif confirmed_exercise in models:
-                        form_data = models[confirmed_exercise]
-                        proba     = form_data["model"].predict_proba([features])[0]
-                        pred_idx  = proba.argmax()
+                        form_data  = models[confirmed_exercise]
+                        proba      = form_data["model"].predict_proba([feat_form])[0]
+                        pred_idx   = proba.argmax()
                         confidence = float(proba[pred_idx])
 
                         feedback_buffer.append(pred_idx)
@@ -262,28 +297,36 @@ def ai_loop(models):
                             label, label.replace("_", " ").title()
                         )
 
-                        with state_lock:
-                            state["status"]           = "active"
-                            state["exercise"]         = confirmed_exercise
-                            state["feedback_key"]     = label
-                            state["feedback_message"] = message
-                            state["form_confidence"]  = confidence
-                            state["is_good_form"]     = (label == "good_form")
+                        # Only show a mistake if the model is confident enough
+                        # Below threshold, fall back to good_form so it doesn't cry wolf
+                        FORM_CONFIDENCE_THRESHOLD = 0.7
+                        if confidence < FORM_CONFIDENCE_THRESHOLD and label != "good_form":
+                            label   = "good_form"
+                            message = FEEDBACK_MESSAGES["good_form"]
 
-        # Person left frame — reset
+                        with state_lock:
+                            state["status"]              = "active"
+                            state["exercise"]            = confirmed_exercise
+                            state["feedback_key"]        = label
+                            state["feedback_message"]    = message
+                            state["form_confidence"]     = confidence
+                            state["feedback_confidence"] = confidence
+                            state["is_good_form"]        = (label == "good_form")
+
+        # Person left frame — reset (but remember forced exercise)
         if no_person:
-            if confirmed_exercise is not None:
+            if confirmed_exercise is not None and forced_exercise is None:
                 confirmed_exercise = None
                 detection_buffer.clear()
                 feedback_buffer.clear()
             with state_lock:
-                state["status"]          = "waiting"
-                state["exercise"]        = None
-                state["feedback_message"] = ""
-                state["form_confidence"] = 0.0
-                state["detection_pct"]   = 0.0
+                state["status"]              = "waiting"
+                state["exercise"]            = None
+                state["feedback_message"]    = ""
+                state["form_confidence"]     = 0.0
+                state["feedback_confidence"] = 0.0
+                state["detection_pct"]       = 0.0
 
-        # Encode frame as JPEG and store for streaming
         _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
         with frame_lock:
             latest_frame = jpeg.tobytes()
@@ -303,7 +346,6 @@ def index():
 
 @app.route("/video_feed")
 def video_feed():
-    """MJPEG stream of the annotated webcam feed."""
     def generate():
         while True:
             with frame_lock:
@@ -315,8 +357,7 @@ def video_feed():
                     frame +
                     b"\r\n"
                 )
-            time.sleep(0.03)  # ~30fps
-
+            time.sleep(0.03)
     return Response(
         generate(),
         mimetype="multipart/x-mixed-replace; boundary=frame"
@@ -325,9 +366,36 @@ def video_feed():
 
 @app.route("/status")
 def status():
-    """JSON snapshot of the current AI state — polled by the browser."""
     with state_lock:
         return jsonify(dict(state))
+
+
+@app.route("/force_exercise", methods=["POST"])
+def force_exercise():
+    """
+    POST {"exercise": "squat"} to lock the exercise.
+    POST {"exercise": null}    to go back to auto-detection.
+    """
+    data     = request.get_json(silent=True) or {}
+    exercise = data.get("exercise")  # None means clear the override
+
+    valid = {"squat", "pushup", "lunge", "plank", None}
+    if exercise not in valid:
+        return jsonify({"ok": False, "error": "unknown exercise"}), 400
+
+    with state_lock:
+        state["forced_exercise"] = exercise
+        # When clearing, also reset detection so auto kicks in cleanly
+        if exercise is None:
+            state["status"]              = "waiting"
+            state["exercise"]            = None
+            state["feedback_message"]    = ""
+            state["form_confidence"]     = 0.0
+            state["feedback_confidence"] = 0.0
+            state["detection_pct"]       = 0.0
+
+    print(f"  → Forced exercise: {exercise or 'auto'}")
+    return jsonify({"ok": True, "exercise": exercise})
 
 
 # ─────────────────────────────────────────────
@@ -338,14 +406,12 @@ if __name__ == "__main__":
     print("\n Loading models...")
     models = load_models()
 
-    # Start AI thread
     ai_thread = threading.Thread(target=ai_loop, args=(models,), daemon=True)
     ai_thread.start()
 
-    # Give the webcam a moment to open
     time.sleep(1)
 
     print("\n Starting web server...")
-    print(" Open your browser at:  http://localhost:5000\n")
+    print(" Open your browser at:  http://localhost:8080\n")
 
     app.run(host="0.0.0.0", port=8080, debug=False, threaded=True)

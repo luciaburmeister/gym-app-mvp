@@ -1,13 +1,766 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>web</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GymCoach</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:           #080808;
+      --surface:      #111111;
+      --border:       #1e1e1e;
+      --accent-good:  #c6f135;
+      --accent-bad:   #ff4f4f;
+      --accent-detect:#f5a623;
+      --accent-manual:#f5a623;
+      --text:         #ffffff;
+      --muted:        #555555;
+      --muted-light:  #888888;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Barlow', sans-serif;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 32px;
+      height: 64px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      background: var(--surface);
+    }
+
+    .logo {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 28px;
+      letter-spacing: 4px;
+      color: var(--accent-good);
+    }
+    .logo span { color: var(--text); }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .toggle-btn {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--muted);
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 5px 10px;
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    .toggle-btn:hover         { color: var(--muted-light); border-color: var(--muted); }
+    .toggle-btn.active        { color: var(--accent-detect); border-color: var(--accent-detect); }
+
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: 'DM Mono', monospace;
+      font-size: 12px;
+      color: var(--muted-light);
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background 0.4s;
+    }
+    .status-dot.waiting   { background: var(--muted); }
+    .status-dot.detecting { background: var(--accent-detect); animation: pulse-detect 1s infinite; }
+    .status-dot.active    { background: var(--accent-good); }
+
+    @keyframes pulse-detect { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    /* ── Layout ── */
+    .main {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Video ── */
+    .video-area {
+      position: relative;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .video-area img { width: 100%; height: 100%; object-fit: cover; }
+
+    .waiting-overlay {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 16px;
+      background: rgba(8,8,8,0.85);
+      transition: opacity 0.5s;
+    }
+    .waiting-overlay.hidden { opacity: 0; pointer-events: none; }
+
+    .waiting-icon {
+      width: 64px; height: 64px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent-good);
+      border-radius: 50%;
+      animation: spin 2s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .waiting-text {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 22px; letter-spacing: 4px;
+      color: var(--muted-light);
+    }
+
+    .detect-bar-wrap {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      height: 4px; background: rgba(255,255,255,0.05);
+      transition: opacity 0.3s;
+    }
+    .detect-bar-wrap.hidden { opacity: 0; }
+    .detect-bar { height: 100%; background: var(--accent-detect); width: 0%; transition: width 0.15s ease-out; }
+
+    /* ── Panel ── */
+    .panel {
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+
+    .panel-section {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .panel-section:last-child { border-bottom: none; }
+
+    .panel-label {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 3px;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    /* ── Exercise name ── */
+    .exercise-name {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 56px;
+      line-height: 1;
+      color: var(--text);
+      transition: opacity 0.4s, color 0.3s;
+      min-height: 60px;
+    }
+    .exercise-name.empty  { opacity: 0.12; }
+    .exercise-name.manual { color: var(--accent-manual); }
+
+    .manual-badge {
+      display: none;
+      font-family: 'DM Mono', monospace;
+      font-size: 10px; letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--accent-manual);
+      background: rgba(245,166,35,0.1);
+      border: 1px solid rgba(245,166,35,0.3);
+      border-radius: 4px;
+      padding: 3px 8px;
+      width: fit-content;
+      margin-top: 6px;
+    }
+    .manual-badge.visible { display: block; }
+
+    /* ── Exercise buttons ── */
+    .exercise-buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .ex-btn {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 20px;
+      letter-spacing: 2px;
+      background: var(--bg);
+      color: var(--muted-light);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px 8px;
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s, background 0.2s;
+      text-align: center;
+    }
+    .ex-btn:hover  { color: var(--text); border-color: var(--muted); }
+    .ex-btn.active {
+      color: var(--accent-manual);
+      border-color: var(--accent-manual);
+      background: rgba(245,166,35,0.08);
+    }
+
+    .force-clear-btn {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px; letter-spacing: 1px;
+      text-transform: uppercase;
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px;
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s;
+      width: 100%;
+      margin-top: 8px;
+      display: none;
+    }
+    .force-clear-btn:hover  { color: var(--muted-light); border-color: var(--muted); }
+    .force-clear-btn.visible { display: block; }
+
+    /* ── Collapsible blocks ── */
+    .collapsible-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .collapsible-header .panel-label { margin-bottom: 0; }
+
+    .collapse-arrow {
+      font-size: 10px;
+      color: var(--muted);
+      transition: transform 0.2s;
+      font-family: 'DM Mono', monospace;
+    }
+    .collapse-arrow.open { transform: rotate(180deg); }
+
+    .collapsible-body {
+      overflow: hidden;
+      max-height: 0;
+      transition: max-height 0.3s ease, margin-top 0.3s;
+    }
+    .collapsible-body.open {
+      max-height: 200px;
+      margin-top: 12px;
+    }
+
+    /* ── Confidence bars ── */
+    .confidence-track {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 6px;
+    }
+    .confidence-fill {
+      height: 100%;
+      border-radius: 3px;
+      background: var(--accent-good);
+      width: 0%;
+      transition: width 0.3s ease-out, background 0.4s;
+    }
+    .confidence-fill.bad { background: var(--accent-bad); }
+
+    .confidence-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .confidence-row span { color: var(--muted-light); }
+
+    /* ── Feedback card ── */
+    .feedback-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px;
+      min-height: 90px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 8px;
+      transition: border-color 0.4s;
+      position: relative;
+      overflow: hidden;
+    }
+    .feedback-card::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 3px;
+      background: var(--muted);
+      transition: background 0.4s;
+    }
+    .feedback-card.good::before { background: var(--accent-good); }
+    .feedback-card.bad::before  { background: var(--accent-bad); }
+    .feedback-card.good { border-color: rgba(198,241,53,0.2); }
+    .feedback-card.bad  { border-color: rgba(255,79,79,0.2); }
+
+    .feedback-tag {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px; text-transform: uppercase; letter-spacing: 2px;
+      color: var(--muted);
+    }
+    .feedback-card.good .feedback-tag { color: var(--accent-good); }
+    .feedback-card.bad  .feedback-tag { color: var(--accent-bad); }
+
+    .feedback-message {
+      font-size: 16px; font-weight: 600; line-height: 1.4;
+      color: var(--text);
+    }
+    .feedback-message.empty { color: var(--muted); font-weight: 400; font-size: 14px; }
+
+    .detecting-text {
+      font-size: 14px; font-weight: 500;
+      color: var(--accent-detect);
+      display: none;
+      margin-bottom: 8px;
+    }
+    .detecting-text.visible { display: block; }
+
+    @keyframes flash-good { 0%{background:rgba(198,241,53,0.08)} 100%{background:transparent} }
+    @keyframes flash-bad  { 0%{background:rgba(255,79,79,0.08)} 100%{background:transparent} }
+    .feedback-card.flash-good { animation: flash-good 0.6s ease-out; }
+    .feedback-card.flash-bad  { animation: flash-bad  0.6s ease-out; }
+
+    /* ── Session Summary ── */
+    .summary-section { flex: 1; display: flex; flex-direction: column; }
+
+    .summary-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex: 1;
+      overflow-y: auto;
+      max-height: 200px;
+    }
+
+    .summary-empty {
+      font-family: 'DM Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 1px;
+    }
+
+    .summary-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 12px;
+      background: var(--bg);
+      border-radius: 6px;
+      border-left: 3px solid var(--border);
+      animation: fadeIn 0.3s ease;
+    }
+    .summary-item.good { border-left-color: var(--accent-good); }
+    .summary-item.bad  { border-left-color: var(--accent-bad); }
+
+    @keyframes fadeIn { from{opacity:0; transform:translateY(4px)} to{opacity:1; transform:translateY(0)} }
+
+    .summary-item-count {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 22px;
+      line-height: 1;
+      color: var(--muted);
+      flex-shrink: 0;
+      min-width: 28px;
+    }
+    .summary-item.bad  .summary-item-count { color: var(--accent-bad); }
+    .summary-item.good .summary-item-count { color: var(--accent-good); }
+
+    .summary-item-text {
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.4;
+      color: var(--muted-light);
+      padding-top: 2px;
+    }
+    .summary-item.bad  .summary-item-text { color: var(--text); }
+
+    .summary-reset-btn {
+      font-family: 'DM Mono', monospace;
+      font-size: 10px; letter-spacing: 1px;
+      text-transform: uppercase;
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 6px 10px;
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s;
+      margin-top: 10px;
+      width: 100%;
+    }
+    .summary-reset-btn:hover { color: var(--muted-light); border-color: var(--muted); }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="logo">Gym<span>Coach</span></div>
+    <div class="header-right">
+      <button class="toggle-btn" id="devToggle">Dev</button>
+      <button class="toggle-btn" id="confToggle">Confidence</button>
+      <div class="status-pill">
+        <div class="status-dot waiting" id="statusDot"></div>
+        <span id="statusText">Waiting for athlete</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="main">
+
+    <!-- Video -->
+    <div class="video-area">
+      <img src="/video_feed" alt="Live feed" />
+      <div class="waiting-overlay" id="waitingOverlay">
+        <div class="waiting-icon"></div>
+        <div class="waiting-text">Step into frame</div>
+      </div>
+      <div class="detect-bar-wrap hidden" id="detectBarWrap">
+        <div class="detect-bar" id="detectBar"></div>
+      </div>
+    </div>
+
+    <!-- Right panel -->
+    <div class="panel">
+
+      <!-- Current exercise display -->
+      <div class="panel-section">
+        <div class="panel-label">Exercise</div>
+        <div class="exercise-name empty" id="exerciseName">—</div>
+        <div class="manual-badge" id="manualBadge">Manual override</div>
+      </div>
+
+      <!-- Exercise selector buttons -->
+      <div class="panel-section">
+        <div class="panel-label">Select Exercise</div>
+        <div class="exercise-buttons">
+          <button class="ex-btn" data-exercise="squat">Squat</button>
+          <button class="ex-btn" data-exercise="pushup">Push-Up</button>
+          <button class="ex-btn" data-exercise="lunge">Lunge</button>
+          <button class="ex-btn" data-exercise="plank">Plank</button>
+        </div>
+        <button class="force-clear-btn" id="forceClearBtn">✕ Back to auto-detection</button>
+      </div>
+
+      <!-- Dev panel: model confidence (collapsible, hidden by default) -->
+      <div class="panel-section" id="devSection" style="display:none">
+        <div class="panel-label">Model Confidence <span style="color:var(--accent-detect)">(dev)</span></div>
+        <div class="confidence-track">
+          <div class="confidence-fill" id="devConfFill"></div>
+        </div>
+        <div class="confidence-row">
+          Exercise detector <span id="devConfNumber">—</span>
+        </div>
+      </div>
+
+      <!-- Live feedback -->
+      <div class="panel-section">
+        <div class="detecting-text" id="detectingText">Identifying exercise...</div>
+        <div class="panel-label">Live Feedback</div>
+        <div class="feedback-card" id="feedbackCard">
+          <div class="feedback-tag" id="feedbackTag">—</div>
+          <div class="feedback-message empty" id="feedbackMessage">Stand in front of the camera to begin</div>
+        </div>
+
+        <!-- Feedback confidence (collapsible, hidden by default) -->
+        <div class="collapsible-body" id="confBody" style="margin-top:0">
+          <div class="confidence-track" style="margin-top:10px">
+            <div class="confidence-fill" id="feedbackConfFill"></div>
+          </div>
+          <div class="confidence-row">
+            Prediction confidence <span id="feedbackConfNumber">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Session summary -->
+      <div class="panel-section summary-section">
+        <div class="panel-label">Session Summary</div>
+        <div class="summary-list" id="summaryList">
+          <div class="summary-empty" id="summaryEmpty">No feedback yet this session</div>
+        </div>
+        <button class="summary-reset-btn" id="summaryResetBtn">Reset session</button>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    // ── DOM refs ──
+    const statusDot        = document.getElementById('statusDot');
+    const statusText       = document.getElementById('statusText');
+    const waitingOverlay   = document.getElementById('waitingOverlay');
+    const detectBarWrap    = document.getElementById('detectBarWrap');
+    const detectBar        = document.getElementById('detectBar');
+    const exerciseName     = document.getElementById('exerciseName');
+    const manualBadge      = document.getElementById('manualBadge');
+    const devToggle        = document.getElementById('devToggle');
+    const confToggle       = document.getElementById('confToggle');
+    const devSection       = document.getElementById('devSection');
+    const devConfFill      = document.getElementById('devConfFill');
+    const devConfNumber    = document.getElementById('devConfNumber');
+    const detectingText    = document.getElementById('detectingText');
+    const feedbackCard     = document.getElementById('feedbackCard');
+    const feedbackTag      = document.getElementById('feedbackTag');
+    const feedbackMessage  = document.getElementById('feedbackMessage');
+    const confBody         = document.getElementById('confBody');
+    const feedbackConfFill = document.getElementById('feedbackConfFill');
+    const feedbackConfNum  = document.getElementById('feedbackConfNumber');
+    const forceClearBtn    = document.getElementById('forceClearBtn');
+    const summaryList      = document.getElementById('summaryList');
+    const summaryEmpty     = document.getElementById('summaryEmpty');
+    const summaryResetBtn  = document.getElementById('summaryResetBtn');
+
+    const EXERCISE_NAMES = { squat:'Squat', pushup:'Push-Up', lunge:'Lunge', plank:'Plank' };
+
+    let prevFeedbackKey  = null;
+    let devVisible       = false;
+    let confVisible      = false;
+    let forcedExercise   = null;
+
+    // Summary tracking: key -> {message, count, isGood}
+    const summaryData = {};
+
+    // ── Dev toggle ──
+    devToggle.addEventListener('click', () => {
+      devVisible = !devVisible;
+      devSection.style.display = devVisible ? 'block' : 'none';
+      devToggle.classList.toggle('active', devVisible);
+    });
+
+    // ── Confidence toggle ──
+    confToggle.addEventListener('click', () => {
+      confVisible = !confVisible;
+      confBody.classList.toggle('open', confVisible);
+      confToggle.classList.toggle('active', confVisible);
+    });
+
+    // ── Exercise buttons ──
+    document.querySelectorAll('.ex-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const exercise = btn.dataset.exercise;
+        if (forcedExercise === exercise) { clearForce(); return; }
+        forcedExercise = exercise;
+        updateForceUI();
+        fetch('/force_exercise', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ exercise }),
+        });
+      });
+    });
+
+    forceClearBtn.addEventListener('click', clearForce);
+
+    function clearForce() {
+      forcedExercise = null;
+      updateForceUI();
+      fetch('/force_exercise', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ exercise: null }),
+      });
+    }
+
+    function updateForceUI() {
+      document.querySelectorAll('.ex-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.exercise === forcedExercise);
+      });
+      forceClearBtn.classList.toggle('visible', forcedExercise !== null);
+    }
+
+    // ── Session summary ──
+    function addToSummary(key, message, isGood) {
+      if (!(key in summaryData)) {
+        summaryData[key] = { message, count: 0, isGood };
+      }
+      summaryData[key].count++;
+      renderSummary();
+    }
+
+    function renderSummary() {
+      const entries = Object.entries(summaryData)
+        .filter(([k]) => k !== 'good_form')  // good form doesn't need to be in summary
+        .sort((a, b) => b[1].count - a[1].count);
+
+      const goodEntry = summaryData['good_form'];
+
+      summaryList.innerHTML = '';
+
+      if (entries.length === 0 && !goodEntry) {
+        summaryList.appendChild(summaryEmpty);
+        summaryEmpty.style.display = 'block';
+        return;
+      }
+
+      // Show corrections first
+      entries.forEach(([key, data]) => {
+        const item = document.createElement('div');
+        item.className = 'summary-item bad';
+        item.innerHTML = `
+          <div class="summary-item-count">${data.count}</div>
+          <div class="summary-item-text">${data.message}</div>
+        `;
+        summaryList.appendChild(item);
+      });
+
+      // Show good form count at bottom if any
+      if (goodEntry && goodEntry.count > 0) {
+        const item = document.createElement('div');
+        item.className = 'summary-item good';
+        item.innerHTML = `
+          <div class="summary-item-count">${goodEntry.count}</div>
+          <div class="summary-item-text">Good form frames</div>
+        `;
+        summaryList.appendChild(item);
+      }
+    }
+
+    summaryResetBtn.addEventListener('click', () => {
+      Object.keys(summaryData).forEach(k => delete summaryData[k]);
+      summaryList.innerHTML = '';
+      summaryList.appendChild(summaryEmpty);
+      summaryEmpty.style.display = 'block';
+    });
+
+    // ── Polling ──
+    async function poll() {
+      try {
+        const res  = await fetch('/status');
+        const data = await res.json();
+        update(data);
+      } catch (e) {}
+    }
+
+    function update(data) {
+      const {
+        status, exercise, feedback_key, feedback_message,
+        form_confidence, feedback_confidence, detection_pct, is_good_form,
+        forced_exercise: serverForced,
+      } = data;
+
+      // Sync forced state from server on reload
+      if (serverForced !== undefined && serverForced !== forcedExercise) {
+        forcedExercise = serverForced;
+        updateForceUI();
+      }
+
+      // Status dot
+      statusDot.className = `status-dot ${status}`;
+      if      (status === 'waiting')   statusText.textContent = 'Waiting for athlete';
+      else if (status === 'detecting') statusText.textContent = 'Identifying exercise…';
+      else                             statusText.textContent = 'Live — analysing form';
+
+      // Waiting overlay
+      waitingOverlay.classList.toggle('hidden', status !== 'waiting');
+
+      // Detection bar
+      detectBarWrap.classList.toggle('hidden', status !== 'detecting');
+      if (status === 'detecting') detectBar.style.width = `${Math.round(detection_pct * 100)}%`;
+
+      // Exercise name
+      const isManual = forcedExercise !== null;
+      const exLabel  = exercise ? (EXERCISE_NAMES[exercise] || exercise) : '—';
+      exerciseName.textContent = exLabel;
+      exerciseName.classList.toggle('empty',  !exercise);
+      exerciseName.classList.toggle('manual', isManual && !!exercise);
+      manualBadge.classList.toggle('visible', isManual && !!exercise);
+
+      // Dev confidence
+      if (status === 'active' && form_confidence > 0) {
+        const pct = Math.round(form_confidence * 100);
+        devConfFill.style.width   = `${pct}%`;
+        devConfFill.classList.toggle('bad', !is_good_form);
+        devConfNumber.textContent = `${pct}%`;
+      } else {
+        devConfFill.style.width   = '0%';
+        devConfNumber.textContent = '—';
+      }
+
+      // Detecting text
+      detectingText.classList.toggle('visible', status === 'detecting');
+
+      // Feedback card
+      if (status === 'active' && feedback_message) {
+        feedbackCard.classList.toggle('good', is_good_form);
+        feedbackCard.classList.toggle('bad',  !is_good_form);
+        feedbackTag.textContent     = is_good_form ? '✓ Correct' : '⚠ Correction';
+        feedbackMessage.textContent = feedback_message;
+        feedbackMessage.classList.remove('empty');
+
+        // Flash on change
+        if (feedback_key !== prevFeedbackKey) {
+          feedbackCard.classList.remove('flash-good', 'flash-bad');
+          void feedbackCard.offsetWidth;
+          feedbackCard.classList.add(is_good_form ? 'flash-good' : 'flash-bad');
+
+          // Add to summary
+          addToSummary(feedback_key, feedback_message, is_good_form);
+
+          prevFeedbackKey = feedback_key;
+        }
+
+        // Feedback confidence bar
+        if (feedback_confidence > 0) {
+          const fPct = Math.round(feedback_confidence * 100);
+          feedbackConfNum.textContent  = `${fPct}%`;
+          feedbackConfFill.style.width = `${fPct}%`;
+          feedbackConfFill.classList.toggle('bad', !is_good_form);
+        }
+
+      } else if (status === 'detecting') {
+        feedbackCard.className      = 'feedback-card';
+        feedbackTag.textContent     = '—';
+        feedbackMessage.textContent = 'Hold your position…';
+        feedbackMessage.classList.add('empty');
+
+      } else {
+        feedbackCard.className      = 'feedback-card';
+        feedbackTag.textContent     = '—';
+        feedbackMessage.textContent = 'Stand in front of the camera to begin';
+        feedbackMessage.classList.add('empty');
+        prevFeedbackKey = null;
+      }
+    }
+
+    setInterval(poll, 300);
+    poll();
+  </script>
+
+</body>
 </html>
