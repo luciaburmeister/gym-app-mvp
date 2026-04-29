@@ -200,6 +200,39 @@
     }
     .manual-badge.visible { display: block; }
 
+    /* ── Rep counter ── */
+    .rep-section {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+
+    .rep-number {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 72px;
+      line-height: 1;
+      color: var(--accent-good);
+      transition: color 0.3s;
+      min-width: 80px;
+    }
+
+    .rep-number.empty { color: var(--muted); opacity: 0.3; }
+
+    .rep-unit {
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--muted-light);
+    }
+
+    /* Flash animation when a rep is counted */
+    @keyframes rep-flash {
+      0%   { color: #ffffff; transform: scale(1.08); }
+      100% { color: var(--accent-good); transform: scale(1); }
+    }
+    .rep-number.flash { animation: rep-flash 0.35s ease-out; }
+
     /* ── Exercise buttons ── */
     .exercise-buttons {
       display: grid;
@@ -465,6 +498,15 @@
         <div class="manual-badge" id="manualBadge">Manual override</div>
       </div>
 
+      <!-- Rep counter / Plank timer -->
+      <div class="panel-section" id="repSection">
+        <div class="panel-label" id="repLabel">Reps</div>
+        <div class="rep-section">
+          <div class="rep-number empty" id="repNumber">0</div>
+          <div class="rep-unit" id="repUnit">reps</div>
+        </div>
+      </div>
+
       <!-- Exercise selector buttons -->
       <div class="panel-section">
         <div class="panel-label">Select Exercise</div>
@@ -477,7 +519,7 @@
         <button class="force-clear-btn" id="forceClearBtn">✕ Back to auto-detection</button>
       </div>
 
-      <!-- Dev panel: model confidence (collapsible, hidden by default) -->
+      <!-- Dev panel: model confidence (hidden by default) -->
       <div class="panel-section" id="devSection" style="display:none">
         <div class="panel-label">Model Confidence <span style="color:var(--accent-detect)">(dev)</span></div>
         <div class="confidence-track">
@@ -545,6 +587,9 @@
     const summaryList      = document.getElementById('summaryList');
     const summaryEmpty     = document.getElementById('summaryEmpty');
     const summaryResetBtn  = document.getElementById('summaryResetBtn');
+    const repNumber        = document.getElementById('repNumber');
+    const repUnit          = document.getElementById('repUnit');
+    const repLabel         = document.getElementById('repLabel');
 
     const EXERCISE_NAMES = { squat:'Squat', pushup:'Push-Up', lunge:'Lunge', plank:'Plank' };
 
@@ -552,8 +597,9 @@
     let devVisible       = false;
     let confVisible      = false;
     let forcedExercise   = null;
+    let prevRepCount     = 0;
+    let currentExercise  = null;
 
-    // Summary tracking: key -> {message, count, isGood}
     const summaryData = {};
 
     // ── Dev toggle ──
@@ -576,6 +622,7 @@
         const exercise = btn.dataset.exercise;
         if (forcedExercise === exercise) { clearForce(); return; }
         forcedExercise = exercise;
+        prevRepCount = 0;
         updateForceUI();
         fetch('/force_exercise', {
           method: 'POST',
@@ -589,6 +636,7 @@
 
     function clearForce() {
       forcedExercise = null;
+      prevRepCount = 0;
       updateForceUI();
       fetch('/force_exercise', {
         method: 'POST',
@@ -604,6 +652,45 @@
       forceClearBtn.classList.toggle('visible', forcedExercise !== null);
     }
 
+    // ── Rep counter display ──
+    function updateRepDisplay(exercise, repCount, holdTime) {
+      const isActive = !!exercise;
+      const isPlank  = exercise === 'plank';
+
+      if (!isActive) {
+        repNumber.textContent = '0';
+        repNumber.classList.add('empty');
+        repUnit.textContent  = 'reps';
+        repLabel.textContent = 'Reps';
+        return;
+      }
+
+      repNumber.classList.remove('empty');
+
+      if (isPlank) {
+        // Show hold time in seconds
+        repLabel.textContent  = 'Hold Time';
+        repUnit.textContent   = 'sec';
+        repNumber.textContent = Math.floor(holdTime);
+      } else {
+        repLabel.textContent  = 'Reps';
+        repUnit.textContent   = 'reps';
+        repNumber.textContent = repCount;
+
+        // Flash animation when a new rep is counted
+        if (repCount > prevRepCount) {
+          repNumber.classList.remove('flash');
+          void repNumber.offsetWidth; // force reflow
+          repNumber.classList.add('flash');
+          repNumber.addEventListener('animationend', () => {
+            repNumber.classList.remove('flash');
+          }, { once: true });
+        }
+      }
+
+      prevRepCount = repCount;
+    }
+
     // ── Session summary ──
     function addToSummary(key, message, isGood) {
       if (!(key in summaryData)) {
@@ -615,7 +702,7 @@
 
     function renderSummary() {
       const entries = Object.entries(summaryData)
-        .filter(([k]) => k !== 'good_form')  // good form doesn't need to be in summary
+        .filter(([k]) => k !== 'good_form')
         .sort((a, b) => b[1].count - a[1].count);
 
       const goodEntry = summaryData['good_form'];
@@ -628,7 +715,6 @@
         return;
       }
 
-      // Show corrections first
       entries.forEach(([key, data]) => {
         const item = document.createElement('div');
         item.className = 'summary-item bad';
@@ -639,7 +725,6 @@
         summaryList.appendChild(item);
       });
 
-      // Show good form count at bottom if any
       if (goodEntry && goodEntry.count > 0) {
         const item = document.createElement('div');
         item.className = 'summary-item good';
@@ -656,6 +741,9 @@
       summaryList.innerHTML = '';
       summaryList.appendChild(summaryEmpty);
       summaryEmpty.style.display = 'block';
+      prevRepCount = 0;
+      repNumber.textContent = '0';
+      repNumber.classList.add('empty');
     });
 
     // ── Polling ──
@@ -672,12 +760,19 @@
         status, exercise, feedback_key, feedback_message,
         form_confidence, feedback_confidence, detection_pct, is_good_form,
         forced_exercise: serverForced,
+        rep_count, hold_time,
       } = data;
 
       // Sync forced state from server on reload
       if (serverForced !== undefined && serverForced !== forcedExercise) {
         forcedExercise = serverForced;
         updateForceUI();
+      }
+
+      // Reset rep count if exercise changed
+      if (exercise !== currentExercise) {
+        prevRepCount    = 0;
+        currentExercise = exercise;
       }
 
       // Status dot
@@ -701,6 +796,9 @@
       exerciseName.classList.toggle('manual', isManual && !!exercise);
       manualBadge.classList.toggle('visible', isManual && !!exercise);
 
+      // Rep counter / plank timer
+      updateRepDisplay(exercise, rep_count || 0, hold_time || 0);
+
       // Dev confidence
       if (status === 'active' && form_confidence > 0) {
         const pct = Math.round(form_confidence * 100);
@@ -723,19 +821,14 @@
         feedbackMessage.textContent = feedback_message;
         feedbackMessage.classList.remove('empty');
 
-        // Flash on change
         if (feedback_key !== prevFeedbackKey) {
           feedbackCard.classList.remove('flash-good', 'flash-bad');
           void feedbackCard.offsetWidth;
           feedbackCard.classList.add(is_good_form ? 'flash-good' : 'flash-bad');
-
-          // Add to summary
           addToSummary(feedback_key, feedback_message, is_good_form);
-
           prevFeedbackKey = feedback_key;
         }
 
-        // Feedback confidence bar
         if (feedback_confidence > 0) {
           const fPct = Math.round(feedback_confidence * 100);
           feedbackConfNum.textContent  = `${fPct}%`;
@@ -758,7 +851,8 @@
       }
     }
 
-    setInterval(poll, 300);
+    // Poll every 100ms for snappier feedback (was 300ms)
+    setInterval(poll, 100);
     poll();
   </script>
 

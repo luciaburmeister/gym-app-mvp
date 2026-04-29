@@ -4,7 +4,7 @@ from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import glob
 
-# ── KEYPOINT NAME LOOKUP ─────────────────────────────────────────────────────
+# ── KEYPOINT NAME LOOKUP 
 
 KP_NAMES = {
     "kp_0":  "nose",
@@ -36,7 +36,7 @@ def readable_name(feature):
 
 # ── LOAD DATA ────────────────────────────────────────────────────────────────
 
-csv_files = glob.glob("/Users/lucia/Desktop/GymCoach/processed/*.csv")
+csv_files = csv_files = glob.glob("processed/*.csv")
 df = pd.concat([pd.read_csv(f) for f in csv_files], ignore_index=True)
 
 feature_cols = [
@@ -98,6 +98,6 @@ for exercise in exercises:
     plt.xlabel(f"Component 1 ({explained[0]*100:.1f}% variance)")
     plt.ylabel(f"Component 2 ({explained[1]*100:.1f}% variance)")
     plt.tight_layout()
-    plt.savefig(f"/Users/lucia/Desktop/GymCoach/pca_{exercise}.png", dpi=150)
+    plt.savefig(f"plots/pca_{exercise}.png", dpi=150)
     plt.close()
     print(f"\n  Saved to pca_{exercise}.png")
