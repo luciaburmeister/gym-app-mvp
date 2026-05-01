@@ -4,7 +4,7 @@ from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import glob
 
-# ── KEYPOINT NAME LOOKUP 
+#key point lookup
 
 KP_NAMES = {
     "kp_0":  "nose",
@@ -34,7 +34,7 @@ def readable_name(feature):
         return f"{KP_NAMES.get(kp_key, kp_key)}_{axis}"
     return feature
 
-# ── LOAD DATA ────────────────────────────────────────────────────────────────
+#data loading 
 
 csv_files = csv_files = glob.glob("processed/*.csv")
 df = pd.concat([pd.read_csv(f) for f in csv_files], ignore_index=True)
@@ -45,7 +45,7 @@ feature_cols = [
     "left_elbow_angle", "right_elbow_angle"
 ]
 
-#  RUN PCA PER EXERCISE 
+#pca per exercise 
 
 exercises = ["squat", "lunge", "pushup", "plank"]
 
@@ -59,14 +59,14 @@ for exercise in exercises:
     X = sub[feature_cols].values
     y = sub["mistake"].values
 
-    # Scale first — PCA is sensitive to units
+    #scale features before PCA
     X_scaled = StandardScaler().fit_transform(X)
 
     # Reduce to 2 dimensions
     pca = PCA(n_components=2)
     X_2d = pca.fit_transform(X_scaled)
 
-    # ── Print loadings ───────────────────────────────────────────────────────
+    #print loadings and explained variance
     loadings = pd.DataFrame(
         pca.components_.T,
         index=[readable_name(f) for f in feature_cols],
@@ -84,7 +84,7 @@ for exercise in exercises:
     print(f"\n  Loadings (what each component represents):")
     print(loadings.round(3).sort_values("Component 1", ascending=False).to_string())
 
-    # ── Plot ─────────────────────────────────────────────────────────────────
+    #plot 
     plt.figure(figsize=(10, 7))
 
     for label in sorted(set(y)):

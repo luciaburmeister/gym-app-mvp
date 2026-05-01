@@ -52,11 +52,9 @@ except ImportError:
     print("      SMOTE oversampling will be skipped.\n")
 
 
-# ─────────────────────────────────────────────
-#  CONFIG
-# ─────────────────────────────────────────────
+#configuration 
 
-PROCESSED_DIR = "processed"
+PROCESSED_DIR = "labels"
 MODELS_DIR    = "models"
 PLOTS_DIR     = "plots"
 
@@ -90,10 +88,7 @@ PARAM_GRID = {
 }
 
 
-# ─────────────────────────────────────────────
-#  KEYPOINT NORMALIZATION
-#  Must match normalize_keypoints() in app.py exactly
-# ─────────────────────────────────────────────
+# key point normalization
 
 def normalize_keypoints(df):
     """
@@ -129,9 +124,7 @@ def normalize_keypoints(df):
     return df
 
 
-# ─────────────────────────────────────────────
-#  STEP 1 — MERGE ALL CSVs
-# ─────────────────────────────────────────────
+#step 1 — data loading and merging
 
 def merge_csvs():
     csv_files = [f for f in os.listdir(PROCESSED_DIR) if f.endswith(".csv")]
@@ -139,7 +132,7 @@ def merge_csvs():
     if not csv_files:
         raise FileNotFoundError(
             f"No CSV files found in '{PROCESSED_DIR}/'. "
-            f"Run process_clips.py first."
+            f"Check that the labels/ directory contains the training CSVs."
         )
 
     print(f"\n  Found {len(csv_files)} CSV file(s) in {PROCESSED_DIR}/")
@@ -163,9 +156,7 @@ def merge_csvs():
     return combined
 
 
-# ─────────────────────────────────────────────
-#  HELPER — CLASS BALANCE DIAGNOSIS
-# ─────────────────────────────────────────────
+#class balance diagnosis
 
 def diagnose_class_balance(y_series, exercise_name):
     counts   = y_series.value_counts()
@@ -197,9 +188,7 @@ def diagnose_class_balance(y_series, exercise_name):
     return warnings_found
 
 
-# ─────────────────────────────────────────────
-#  HELPER — SMOTE
-# ─────────────────────────────────────────────
+#smote 
 
 def apply_smote(X_train, y_train):
     if not SMOTE_AVAILABLE:
@@ -220,9 +209,7 @@ def apply_smote(X_train, y_train):
         return X_train, y_train
 
 
-# ─────────────────────────────────────────────
-#  HELPER — HYPERPARAMETER TUNING
-# ─────────────────────────────────────────────
+#hyperparameter tuning
 
 def tune_hyperparameters(X_train, y_train):
     print(f"\n  Tuning hyperparameters (this may take a minute)...")
@@ -251,9 +238,7 @@ def tune_hyperparameters(X_train, y_train):
     return grid_search.best_estimator_
 
 
-# ─────────────────────────────────────────────
-#  PLOTS
-# ─────────────────────────────────────────────
+#plots
 
 def plot_learning_curve(model, X, y, exercise_name, class_names):
     print(f"  Generating learning curve...")
@@ -374,9 +359,7 @@ def plot_feature_importance(model, exercise_name, top_n=15):
     print(f"  Saved → {path}")
 
 
-# ─────────────────────────────────────────────
-#  STEP 2 — TRAIN ONE MODEL PER EXERCISE
-# ─────────────────────────────────────────────
+#step 2 — training models
 
 def train_exercise_model(df_exercise, exercise_name):
     print(f"\n{'─' * 60}")
@@ -464,9 +447,7 @@ def train_exercise_model(df_exercise, exercise_name):
     return model, encoder
 
 
-# ─────────────────────────────────────────────
-#  STEP 3 — SAVE MODELS
-# ─────────────────────────────────────────────
+#step 3 saving models
 
 def save_model(model, encoder, exercise_name):
     os.makedirs(MODELS_DIR, exist_ok=True)
@@ -484,9 +465,7 @@ def save_model(model, encoder, exercise_name):
     print(f"  Saved → {output_path}")
 
 
-# ─────────────────────────────────────────────
-#  MAIN
-# ─────────────────────────────────────────────
+#main 
 
 def run():
     print("\n" + "═" * 60)

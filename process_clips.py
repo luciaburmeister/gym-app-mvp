@@ -103,9 +103,7 @@ def calculate_angles(kp):
     }
 
 
-# ─────────────────────────────────────────────
-#  CORE PROCESSING
-# ─────────────────────────────────────────────
+# core processing 
 
 def process_clip(model, video_path, exercise, label, mistake, output_csv):
     """
@@ -174,9 +172,7 @@ def process_clip(model, video_path, exercise, label, mistake, output_csv):
     return len(rows)
 
 
-# ─────────────────────────────────────────────
-#  LABEL LOADING
-# ─────────────────────────────────────────────
+#label loading 
 
 def load_all_labels():
     """
@@ -220,9 +216,7 @@ def load_all_labels():
     return combined
 
 
-# ─────────────────────────────────────────────
-#  BATCH RUNNER
-# ─────────────────────────────────────────────
+#batch runner 
 
 def run_all_clips():
     """
@@ -292,9 +286,7 @@ def run_all_clips():
     print(f"{'─' * 65}\n")
 
 
-# ─────────────────────────────────────────────
-#  UTILITIES
-# ─────────────────────────────────────────────
+#utilities 
 
 def find_video(filename):
     """
@@ -307,9 +299,7 @@ def find_video(filename):
     return None
 
 
-# ─────────────────────────────────────────────
-#  ENTRY POINT
-# ─────────────────────────────────────────────
+#entry point
 
 if __name__ == "__main__":
     run_all_clips()

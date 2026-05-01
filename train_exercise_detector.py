@@ -43,11 +43,9 @@ except ImportError:
     print("      Run: pip install imbalanced-learn\n")
 
 
-# ─────────────────────────────────────────────
-#  CONFIG
-# ─────────────────────────────────────────────
+#configuration
 
-PROCESSED_DIR = "processed"
+PROCESSED_DIR = "labels"
 MODELS_DIR    = "models"
 PLOTS_DIR     = "plots"
 
@@ -99,10 +97,9 @@ PARAM_GRID = {
 }
 
 
-# ─────────────────────────────────────────────
 #  KEYPOINT NORMALIZATION
 #  Must match normalize_keypoints() in app.py exactly
-# ─────────────────────────────────────────────
+
 
 def normalize_keypoints(df):
     """
@@ -132,10 +129,9 @@ def normalize_keypoints(df):
     return df
 
 
-# ─────────────────────────────────────────────
 #  FEATURE ENGINEERING
 #  Must match extract_features_detector() in app.py exactly
-# ─────────────────────────────────────────────
+
 
 def add_detector_features(df):
     """
@@ -170,9 +166,7 @@ def add_detector_features(df):
     return df
 
 
-# ─────────────────────────────────────────────
-#  STEP 1 — LOAD ALL CSVs
-# ─────────────────────────────────────────────
+#step 1 — data loading and merging
 
 def load_data():
     csv_files = [f for f in os.listdir(PROCESSED_DIR) if f.endswith(".csv")]
@@ -180,7 +174,7 @@ def load_data():
     if not csv_files:
         raise FileNotFoundError(
             f"No CSV files found in '{PROCESSED_DIR}/'. "
-            "Run process_clips.py first."
+            "Check that the labels/ directory contains the training CSVs."
         )
 
     print(f"\n  Found {len(csv_files)} CSV files in {PROCESSED_DIR}/")
@@ -206,9 +200,7 @@ def load_data():
     return combined
 
 
-# ─────────────────────────────────────────────
-#  STEP 2 — PREPARE FEATURES AND LABELS
-# ─────────────────────────────────────────────
+#step 2 — prepare features and labels
 
 def prepare(df):
     missing = [c for c in BASE_FEATURES if c not in df.columns]
@@ -237,9 +229,7 @@ def prepare(df):
     return X, y
 
 
-# ─────────────────────────────────────────────
-#  STEP 3 — APPLY SMOTE
-# ─────────────────────────────────────────────
+#step 3 — smote for class imbalance
 
 def apply_smote(X_train, y_train):
     if not SMOTE_AVAILABLE:
@@ -297,9 +287,7 @@ def train(X_train, y_train):
         return model
 
 
-# ─────────────────────────────────────────────
-#  STEP 5 — EVALUATE
-# ─────────────────────────────────────────────
+# step 5 — evaluation and plots
 
 def evaluate(model, encoder, X_test, y_test):
     y_pred      = model.predict(X_test)
@@ -362,9 +350,7 @@ def evaluate(model, encoder, X_test, y_test):
     print(f"  Saved feature importance → {path}")
 
 
-# ─────────────────────────────────────────────
-#  STEP 6 — SAVE
-# ─────────────────────────────────────────────
+#step 6 — save model and encoder
 
 def save(model, encoder):
     os.makedirs(MODELS_DIR, exist_ok=True)
@@ -381,9 +367,7 @@ def save(model, encoder):
     print(f"\n  Saved → {path}")
 
 
-# ─────────────────────────────────────────────
-#  MAIN
-# ─────────────────────────────────────────────
+#main run function
 
 def run():
     print("\n" + "═" * 60)

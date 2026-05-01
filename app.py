@@ -41,9 +41,7 @@ from flask import Flask, Response, jsonify, render_template, request
 from ultralytics import YOLO
 
 
-# ─────────────────────────────────────────────
-#  CONFIG
-# ─────────────────────────────────────────────
+#configuration 
 
 MODELS_DIR           = "models"
 MODEL_WEIGHTS        = "yolov8n-pose.pt"
@@ -89,9 +87,7 @@ FEEDBACK_MESSAGES = {
 }
 
 
-# ─────────────────────────────────────────────
-#  REP COUNTER
-# ─────────────────────────────────────────────
+#rep counter 
 
 class RepCounter:
     """
@@ -191,9 +187,7 @@ class RepCounter:
         return None
 
 
-# ─────────────────────────────────────────────
-#  PLANK TIMER
-# ─────────────────────────────────────────────
+#plank timer 
 
 class PlankTimer:
     """
@@ -229,9 +223,7 @@ class PlankTimer:
         return self.hold_time
 
 
-# ─────────────────────────────────────────────
-#  GLOBAL STATE
-# ─────────────────────────────────────────────
+#global state
 
 state_lock = threading.Lock()
 
@@ -253,9 +245,7 @@ frame_lock   = threading.Lock()
 latest_frame = None
 
 
-# ─────────────────────────────────────────────
-#  GEOMETRY HELPERS
-# ─────────────────────────────────────────────
+#geometry helpers 
 
 def get_angle(a, b, c):
     ba = (a[0] - b[0], a[1] - b[1])
@@ -367,9 +357,7 @@ def extract_features_form(kp):
     )
 
 
-# ─────────────────────────────────────────────
-#  MODEL LOADING
-# ─────────────────────────────────────────────
+#model loading 
 
 def load_models():
     models = {}
@@ -393,9 +381,7 @@ def load_models():
     return models
 
 
-# ─────────────────────────────────────────────
-#  AI PROCESSING THREAD
-# ─────────────────────────────────────────────
+#ai processing thread 
 
 def ai_loop(models):
     global latest_frame, state
@@ -456,7 +442,7 @@ def ai_loop(models):
                     feat_det  = extract_features_detector(kp_norm)
                     feat_form = extract_features_form(kp_norm)
 
-                    # ── Exercise detection ────────────────────────────────
+                    #Exercise detection 
                     if confirmed_exercise is None and forced_exercise is None:
                         det_proba = detector["model"].predict_proba([feat_det])[0]
                         det_label = detector["encoder"].inverse_transform(
@@ -485,7 +471,7 @@ def ai_loop(models):
                             state["detection_pct"] = det_pct
                             state["exercise"]      = None
 
-                    # ── Form feedback + rep counting ──────────────────────
+                    # Form feedback + rep counting 
                     elif confirmed_exercise in models:
 
                         # ── Rep counting ──
@@ -498,7 +484,7 @@ def ai_loop(models):
                         elif rep_counter is not None:
                             current_reps = rep_counter.update(kp, conf)  # raw kp for rep counting
 
-                        # ── Form feedback ──
+                        #  Form feedback 
                         form_data  = models[confirmed_exercise]
                         proba      = form_data["model"].predict_proba([feat_form])[0]
                         pred_idx   = proba.argmax()
@@ -558,9 +544,7 @@ def _make_counter(exercise, plank_timer):
     return RepCounter(exercise)
 
 
-# ─────────────────────────────────────────────
-#  FLASK APP
-# ─────────────────────────────────────────────
+#flask app and routes
 
 app = Flask(__name__)
 
@@ -621,9 +605,7 @@ def force_exercise():
     return jsonify({"ok": True, "exercise": exercise})
 
 
-# ─────────────────────────────────────────────
-#  ENTRY POINT
-# ─────────────────────────────────────────────
+#entry point
 
 if __name__ == "__main__":
     print("\n Loading models...")

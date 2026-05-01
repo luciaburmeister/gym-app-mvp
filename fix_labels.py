@@ -31,9 +31,7 @@ import pandas as pd
 
 PROCESSED_DIR = "processed"
 
-# ─────────────────────────────────────────────
-#  MAPPINGS
-# ─────────────────────────────────────────────
+#maps 
 
 EXERCISE_MAP = {
     "pushups": "pushup",
@@ -78,9 +76,7 @@ LABEL_MAP = {
 }
 
 
-# ─────────────────────────────────────────────
-#  MAIN
-# ─────────────────────────────────────────────
+# main 
 
 def fix_all():
     csv_files = [f for f in os.listdir(PROCESSED_DIR) if f.endswith(".csv")]
