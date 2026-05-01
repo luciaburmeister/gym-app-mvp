@@ -1,24 +1,29 @@
-<<<<<<< HEAD
-raw_clips/
-processed/
-models/
-*.pkl
-*.pt
-*.mp4
-*.mov
-venv/
-__pycache__/
-=======
 # Python
 venv/
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
 .env
+
+# Models & data (large files — share via Google Drive)
+models/
+raw_clips/
+processed/
+*.pkl
+*.pt
+
+# Training outputs
+plots/
+*.png
+
+# Video files
+*.mp4
+*.mov
 
 # Node
 node_modules/
 dist/
 
 # OS
->>>>>>> 2a96a54fd04ceb34534159f975ddf80ca3b4d7e4
 .DS_Store
+.Rhistory

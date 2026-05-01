@@ -31,20 +31,26 @@ Built with YOLOv8-pose for pose estimation and scikit-learn Random Forest classi
 ```
 gym-app-mvp/
 │
-├── agent/
-│   ├── app.py                      # Main Flask server — run this to use the app
-│   ├── train_model.py              # Trains one form classifier per exercise
-│   ├── train_exercise_detector.py  # Trains the exercise detector model
-│   ├── feature_importance.py       # Visualises which features matter most
-│   └── live.py                     # Standalone webcam version (no browser needed)
+├── app.py                      # Main Flask server — run this to use the app
+├── train_model.py              # Trains one form classifier per exercise
+├── train_exercise_detector.py  # Trains the exercise detector model
+├── process_clips.py            # Batch processes raw video clips into CSVs
+├── feature_importance.py       # Visualises which features matter most
+├── fix_labels.py               # Utility to clean and fix label files
+├── pca.py                      # PCA analysis on pose features
 │
-├── web/
-│   └── templates/
-│       └── index.html              # Browser UI
+├── labels/                     # Processed training CSVs (committed to repo)
+│   ├── idle.csv
+│   ├── lunge.csv
+│   ├── plank.csv
+│   ├── pushups.csv
+│   └── squat.csv
 │
-├── models/                         # Trained .pkl files (git-ignored)
-├── processed/                      # Processed CSV data (git-ignored)
-├── plots/                          # Training charts output (git-ignored)
+├── templates/
+│   └── index.html              # Browser UI
+│
+├── models/                     # Trained .pkl files — git-ignored, train locally
+├── plots/                      # Training charts output — git-ignored
 │
 ├── requirements.txt
 └── README.md
@@ -75,56 +81,31 @@ venv\Scripts\activate           # Windows
 pip install -r requirements.txt
 ```
 
-### 4. Get the trained models
+### 4. Train the models
 
-The `.pkl` model files are not stored in the repo (they are large binary files). Get them from the shared Google Drive folder and place them in `agent/models/`:
+The `.pkl` model files are not stored in the repo. Train them locally using the label CSVs already included in the repo — no raw video needed.
 
-```
-agent/models/
-├── exercise_detector.pkl
-├── squat_model.pkl
-├── pushup_model.pkl
-├── lunge_model.pkl
-└── plank_model.pkl
-```
-
-### 5. Run the app
+**Step 1 — Train the exercise detector** (identifies which exercise you are doing):
 
 ```bash
-cd agent
-python app.py
-```
-
-Then open your browser at **http://localhost:8080**
-
----
-
-## Training your own models
-
-Only needed if you have recorded new training data and want to retrain.
-
-### Step 1 — Process your video clips
-
-Your raw clips should be labelled and processed into CSVs using `process_clips.py` (see Google Drive for the script and raw data). Processed CSVs go into `agent/processed/`.
-
-### Step 2 — Train the exercise detector
-
-This model decides *which* exercise you are doing.
-
-```bash
-cd agent
 python train_exercise_detector.py
 ```
 
-### Step 3 — Train the form classifiers
-
-One model per exercise, each deciding *what mistake* you are making.
+**Step 2 — Train the form classifiers** (one model per exercise, identifies specific mistakes):
 
 ```bash
 python train_model.py
 ```
 
-Both scripts save their output to `agent/models/` automatically.
+Both scripts save their output to `models/` automatically.
+
+### 5. Run the app
+
+```bash
+python app.py
+```
+
+Then open your browser at **http://localhost:8080**
 
 ---
 
@@ -153,6 +134,26 @@ Feedback displayed in browser + rep counted
 
 ---
 
+## If you have new training data
+
+Only needed if you have recorded new video clips and want to retrain from scratch.
+
+### Step 1 — Process your raw clips
+
+Raw clips should be organised by label and placed in `raw_clips/`. Then run:
+
+```bash
+python process_clips.py
+```
+
+This generates CSVs in `processed/` which can then be merged into the `labels/` folder.
+
+### Step 2 — Retrain
+
+Follow the same training steps as above (train_exercise_detector.py → train_model.py).
+
+---
+
 ## Tech stack
 
 | Layer | Technology |
@@ -174,6 +175,3 @@ Feedback displayed in browser + rep counted
 
 ---
 
-## Team
-
-IE University — built as part of an applied AI project.

@@ -10,10 +10,10 @@ WHICH exercise you are doing (squat, pushup, lunge, plank, or transition).
 
 Run this BEFORE running app.py.
 
-FIX v2:
-- Feature vector now matches app.py exactly: 42 base + 9 asymmetry + 1 torso = 52 features
-- Added torso_angle: best single feature for upright (squat/lunge) vs horizontal (plank/pushup)
-- Added 9 asymmetry features: left/right differences that strongly distinguish lunge from squat
+v3 changes:
+- Keypoint normalization added: keypoints translated to hip origin and
+  scaled by torso length before computing asymmetry and torso_angle features.
+  This makes the detector robust to position and scale differences.
 
 Usage:
     python train_exercise_detector.py
@@ -22,7 +22,6 @@ Usage:
 import os
 import pickle
 import warnings
-import math
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -44,13 +43,14 @@ except ImportError:
     print("      Run: pip install imbalanced-learn\n")
 
 
-#configuration constants
+# ─────────────────────────────────────────────
+#  CONFIG
+# ─────────────────────────────────────────────
 
 PROCESSED_DIR = "processed"
 MODELS_DIR    = "models"
 PLOTS_DIR     = "plots"
 
-# Keypoint indices (YOLO ordering)
 LEFT_SHOULDER  = 5;  RIGHT_SHOULDER = 6
 LEFT_ELBOW     = 7;  RIGHT_ELBOW    = 8
 LEFT_WRIST     = 9;  RIGHT_WRIST    = 10
@@ -58,7 +58,6 @@ LEFT_HIP       = 11; RIGHT_HIP      = 12
 LEFT_KNEE      = 13; RIGHT_KNEE     = 14
 LEFT_ANKLE     = 15; RIGHT_ANKLE    = 16
 
-# Base angle + keypoint features (same as form classifiers)
 ANGLE_FEATURES = [
     "left_knee_angle",
     "right_knee_angle",
@@ -75,8 +74,6 @@ KEYPOINT_FEATURES = (
     [f"kp_{i}_y" for i in range(17)]
 )
 
-# Extra features only the detector uses
-# These are computed from the base keypoints at training time
 ASYMMETRY_FEATURES = [
     "asym_knee_angle",
     "asym_hip_angle",
@@ -89,10 +86,9 @@ ASYMMETRY_FEATURES = [
     "asym_ankle_y",
 ]
 
-EXTRA_FEATURES = ASYMMETRY_FEATURES + ["torso_angle"]
-
-BASE_FEATURES   = ANGLE_FEATURES + KEYPOINT_FEATURES        # 42 features
-DETECTOR_FEATURES = BASE_FEATURES + EXTRA_FEATURES          # 52 features
+EXTRA_FEATURES    = ASYMMETRY_FEATURES + ["torso_angle"]
+BASE_FEATURES     = ANGLE_FEATURES + KEYPOINT_FEATURES       # 42 features
+DETECTOR_FEATURES = BASE_FEATURES + EXTRA_FEATURES           # 52 features
 
 TUNE_HYPERPARAMS = True
 
@@ -103,20 +99,52 @@ PARAM_GRID = {
 }
 
 
-# feature engineering 
-#  Must match extract_features_detector() in app.py exactly
+# ─────────────────────────────────────────────
+#  KEYPOINT NORMALIZATION
+#  Must match normalize_keypoints() in app.py exactly
+# ─────────────────────────────────────────────
 
+def normalize_keypoints(df):
+    """
+    Makes keypoint coordinates position and scale invariant.
+
+    1. Translate: subtract hip midpoint so hips are always at (0, 0)
+    2. Scale: divide by torso length so height differences don't matter
+
+    This must stay in sync with normalize_keypoints() in app.py.
+    """
+    df = df.copy()
+
+    hip_mid_x      = (df["kp_11_x"] + df["kp_12_x"]) / 2
+    hip_mid_y      = (df["kp_11_y"] + df["kp_12_y"]) / 2
+    shoulder_mid_x = (df["kp_5_x"]  + df["kp_6_x"])  / 2
+    shoulder_mid_y = (df["kp_5_y"]  + df["kp_6_y"])  / 2
+
+    torso_length = np.sqrt(
+        (shoulder_mid_x - hip_mid_x) ** 2 +
+        (shoulder_mid_y - hip_mid_y) ** 2
+    ) + 1e-6
+
+    for i in range(17):
+        df[f"kp_{i}_x"] = (df[f"kp_{i}_x"] - hip_mid_x) / torso_length
+        df[f"kp_{i}_y"] = (df[f"kp_{i}_y"] - hip_mid_y) / torso_length
+
+    return df
+
+
+# ─────────────────────────────────────────────
+#  FEATURE ENGINEERING
+#  Must match extract_features_detector() in app.py exactly
+# ─────────────────────────────────────────────
 
 def add_detector_features(df):
     """
-    Takes a dataframe with the 42 base features and adds:
-    - 9 asymmetry features (left vs right differences)
-    - 1 torso angle (upright vs horizontal — best discriminator for exercise type)
-
-    This function must stay in sync with extract_features_detector() in app.py.
+    Adds asymmetry and torso angle features on top of the 42 base features.
+    Called AFTER normalize_keypoints() so these are computed on normalized coords.
+    Must stay in sync with extract_features_detector() in app.py.
     """
 
-    #Asymmetry features 
+    # Asymmetry features
     df["asym_knee_angle"]     = (df["left_knee_angle"]     - df["right_knee_angle"]).abs()
     df["asym_hip_angle"]      = (df["left_hip_angle"]      - df["right_hip_angle"]).abs()
     df["asym_shoulder_angle"] = (df["left_shoulder_angle"] - df["right_shoulder_angle"]).abs()
@@ -128,11 +156,7 @@ def add_detector_features(df):
     df["asym_knee_y"]         = (df["kp_13_y"] - df["kp_14_y"]).abs()
     df["asym_ankle_y"]        = (df["kp_15_y"] - df["kp_16_y"]).abs()
 
-    # torso angle 
-    # Angle of the line from hip midpoint to shoulder midpoint.
-    # 90° = standing upright (squat, lunge)
-    # 0°  = horizontal (plank, pushup)
-    #most powerful angles to detect differences 
+    # Torso angle: ~90° = upright (squat/lunge), ~0° = horizontal (plank/pushup)
     shoulder_mid_x = (df["kp_5_x"]  + df["kp_6_x"])  / 2
     shoulder_mid_y = (df["kp_5_y"]  + df["kp_6_y"])  / 2
     hip_mid_x      = (df["kp_11_x"] + df["kp_12_x"]) / 2
@@ -141,14 +165,14 @@ def add_detector_features(df):
     dx = shoulder_mid_x - hip_mid_x
     dy = shoulder_mid_y - hip_mid_y
 
-    # atan2 gives angle in radians; convert to degrees
-    # We take the absolute value so both left/right lean map to the same value
     df["torso_angle"] = np.degrees(np.arctan2(dy.abs(), dx.abs() + 1e-6))
 
     return df
 
 
-#load data - step 1
+# ─────────────────────────────────────────────
+#  STEP 1 — LOAD ALL CSVs
+# ─────────────────────────────────────────────
 
 def load_data():
     csv_files = [f for f in os.listdir(PROCESSED_DIR) if f.endswith(".csv")]
@@ -182,27 +206,29 @@ def load_data():
     return combined
 
 
-#prepare labels and features - step 2
+# ─────────────────────────────────────────────
+#  STEP 2 — PREPARE FEATURES AND LABELS
+# ─────────────────────────────────────────────
 
 def prepare(df):
-    # Check base features exist
     missing = [c for c in BASE_FEATURES if c not in df.columns]
     if missing:
         raise ValueError(f"Missing columns in data: {missing}")
 
-    # Add asymmetry + torso features
-    print(f"\n  Adding asymmetry and torso angle features...")
+    # Normalize keypoints first, then compute detector-specific features
+    print(f"\n  Normalizing keypoints (position + scale invariant)...")
+    df = normalize_keypoints(df)
+
+    print(f"  Adding asymmetry and torso angle features...")
     df = add_detector_features(df)
 
     X = df[DETECTOR_FEATURES].copy()
     y = df["exercise"].copy()
 
-    # Drop rows where all features are NaN
     valid = X.notna().any(axis=1)
     X     = X[valid]
     y     = y[valid]
 
-    # Fill remaining NaNs with column median
     X = X.fillna(X.median())
 
     print(f"  Feature vector size: {X.shape[1]} features per frame")
@@ -211,7 +237,9 @@ def prepare(df):
     return X, y
 
 
-#apply smote - step 3 
+# ─────────────────────────────────────────────
+#  STEP 3 — APPLY SMOTE
+# ─────────────────────────────────────────────
 
 def apply_smote(X_train, y_train):
     if not SMOTE_AVAILABLE:
@@ -232,7 +260,9 @@ def apply_smote(X_train, y_train):
         return X_train, y_train
 
 
-#train - step 4
+# ─────────────────────────────────────────────
+#  STEP 4 — TRAIN
+# ─────────────────────────────────────────────
 
 def train(X_train, y_train):
     if TUNE_HYPERPARAMS:
@@ -267,7 +297,9 @@ def train(X_train, y_train):
         return model
 
 
-#evaluate - step 5
+# ─────────────────────────────────────────────
+#  STEP 5 — EVALUATE
+# ─────────────────────────────────────────────
 
 def evaluate(model, encoder, X_test, y_test):
     y_pred      = model.predict(X_test)
@@ -280,7 +312,6 @@ def evaluate(model, encoder, X_test, y_test):
     bal_acc = balanced_accuracy_score(y_test, y_pred)
     print(f"  Balanced accuracy: {bal_acc*100:.1f}%")
 
-    # Per-class recall warning
     report = classification_report(y_test, y_pred,
                                    target_names=class_names,
                                    zero_division=0, output_dict=True)
@@ -291,7 +322,6 @@ def evaluate(model, encoder, X_test, y_test):
             print(f"     The detector is struggling to recognise {cls}.")
             print(f"     → Record more {cls} clips to fix this.")
 
-    # Confusion matrix
     os.makedirs(PLOTS_DIR, exist_ok=True)
     cm      = confusion_matrix(y_test, y_pred)
     cm_norm = cm.astype(float) / cm.sum(axis=1, keepdims=True)
@@ -315,7 +345,6 @@ def evaluate(model, encoder, X_test, y_test):
     plt.close()
     print(f"\n  Saved confusion matrix → {path}")
 
-    # Feature importance
     importances  = model.feature_importances_
     indices      = np.argsort(importances)[::-1][:15]
     top_features = [DETECTOR_FEATURES[i] for i in indices]
@@ -333,7 +362,9 @@ def evaluate(model, encoder, X_test, y_test):
     print(f"  Saved feature importance → {path}")
 
 
-#save - step 6
+# ─────────────────────────────────────────────
+#  STEP 6 — SAVE
+# ─────────────────────────────────────────────
 
 def save(model, encoder):
     os.makedirs(MODELS_DIR, exist_ok=True)
@@ -341,19 +372,22 @@ def save(model, encoder):
     payload = {
         "model":       model,
         "encoder":     encoder,
-        "features":    DETECTOR_FEATURES,   # saved so app.py can verify at load time
+        "features":    DETECTOR_FEATURES,
         "class_names": list(encoder.classes_),
+        "normalized":  True,   # flag so app.py knows to normalize at inference
     }
     with open(path, "wb") as f:
         pickle.dump(payload, f)
     print(f"\n  Saved → {path}")
 
 
-#main
+# ─────────────────────────────────────────────
+#  MAIN
+# ─────────────────────────────────────────────
 
 def run():
     print("\n" + "═" * 60)
-    print("  GymCoach MVP — Exercise Detector Training (v2)")
+    print("  GymCoach MVP — Exercise Detector Training (v3 — with normalization)")
     print("═" * 60)
 
     df       = load_data()

@@ -1,7 +1,7 @@
 """
 app.py
 ------
-GymCoach MVP — this is the web interface backend 
+GymCoach MVP — Web Interface Backend
 
 Flask server that:
   1. Runs the full AI pipeline in a background thread
@@ -15,6 +15,11 @@ v3 changes:
   - Added PlankTimer class for plank hold time tracking
   - /status now returns rep_count and hold_time
   - Reset rep counters when exercise changes
+
+v4 changes:
+  - Added normalize_keypoints() to match training pipeline
+  - Keypoints normalized before feature extraction at inference time
+  - Makes the model position and scale invariant (matches retrained models)
 
 Usage:
     python app.py
@@ -36,7 +41,9 @@ from flask import Flask, Response, jsonify, render_template, request
 from ultralytics import YOLO
 
 
-#configuration constants
+# ─────────────────────────────────────────────
+#  CONFIG
+# ─────────────────────────────────────────────
 
 MODELS_DIR           = "models"
 MODEL_WEIGHTS        = "yolov8n-pose.pt"
@@ -46,7 +53,7 @@ DETECTION_THRESHOLD  = 0.7
 FEEDBACK_WINDOW      = 15
 FORM_CONFIDENCE_THRESHOLD = 0.55
 
-#keypoint indices
+# Keypoint indices
 LEFT_SHOULDER  = 5;  RIGHT_SHOULDER = 6
 LEFT_ELBOW     = 7;  RIGHT_ELBOW    = 8
 LEFT_WRIST     = 9;  RIGHT_WRIST    = 10
@@ -82,7 +89,9 @@ FEEDBACK_MESSAGES = {
 }
 
 
-#rep counter
+# ─────────────────────────────────────────────
+#  REP COUNTER
+# ─────────────────────────────────────────────
 
 class RepCounter:
     """
@@ -182,7 +191,9 @@ class RepCounter:
         return None
 
 
-#plank timer 
+# ─────────────────────────────────────────────
+#  PLANK TIMER
+# ─────────────────────────────────────────────
 
 class PlankTimer:
     """
@@ -218,7 +229,9 @@ class PlankTimer:
         return self.hold_time
 
 
-#global state
+# ─────────────────────────────────────────────
+#  GLOBAL STATE
+# ─────────────────────────────────────────────
 
 state_lock = threading.Lock()
 
@@ -240,8 +253,9 @@ frame_lock   = threading.Lock()
 latest_frame = None
 
 
-# geometry helpers 
-
+# ─────────────────────────────────────────────
+#  GEOMETRY HELPERS
+# ─────────────────────────────────────────────
 
 def get_angle(a, b, c):
     ba = (a[0] - b[0], a[1] - b[1])
@@ -264,6 +278,35 @@ def calculate_angles(kp):
         "left_shoulder_angle":  get_angle(kp[LEFT_HIP],       kp[LEFT_SHOULDER],  kp[LEFT_ELBOW]),
         "right_shoulder_angle": get_angle(kp[RIGHT_HIP],      kp[RIGHT_SHOULDER], kp[RIGHT_ELBOW]),
     }
+
+
+def normalize_keypoints(kp):
+    """
+    Makes keypoint coordinates position and scale invariant.
+
+    1. Translate: subtract hip midpoint so hips are always at (0, 0)
+    2. Scale: divide by torso length so height differences don't matter
+
+    Must match normalize_keypoints() in train_model.py and
+    train_exercise_detector.py exactly.
+    """
+    hip_mid_x      = (kp[LEFT_HIP][0]      + kp[RIGHT_HIP][0])      / 2
+    hip_mid_y      = (kp[LEFT_HIP][1]      + kp[RIGHT_HIP][1])      / 2
+    shoulder_mid_x = (kp[LEFT_SHOULDER][0] + kp[RIGHT_SHOULDER][0]) / 2
+    shoulder_mid_y = (kp[LEFT_SHOULDER][1] + kp[RIGHT_SHOULDER][1]) / 2
+
+    torso_length = math.sqrt(
+        (shoulder_mid_x - hip_mid_x) ** 2 +
+        (shoulder_mid_y - hip_mid_y) ** 2
+    ) + 1e-6
+
+    normalized = kp.copy()
+    for i in range(len(kp)):
+        normalized[i] = (
+            (kp[i][0] - hip_mid_x) / torso_length,
+            (kp[i][1] - hip_mid_y) / torso_length,
+        )
+    return normalized
 
 
 def extract_features_detector(kp):
@@ -324,8 +367,9 @@ def extract_features_form(kp):
     )
 
 
-#model loading 
-
+# ─────────────────────────────────────────────
+#  MODEL LOADING
+# ─────────────────────────────────────────────
 
 def load_models():
     models = {}
@@ -349,9 +393,9 @@ def load_models():
     return models
 
 
-
-#ai processing thread 
-
+# ─────────────────────────────────────────────
+#  AI PROCESSING THREAD
+# ─────────────────────────────────────────────
 
 def ai_loop(models):
     global latest_frame, state
@@ -408,10 +452,11 @@ def ai_loop(models):
 
                 if hip_visible:
                     no_person = False
-                    feat_det  = extract_features_detector(kp)
-                    feat_form = extract_features_form(kp)
+                    kp_norm   = normalize_keypoints(kp)
+                    feat_det  = extract_features_detector(kp_norm)
+                    feat_form = extract_features_form(kp_norm)
 
-                    # exercise detection (only if not already confirmed or forced)
+                    # ── Exercise detection ────────────────────────────────
                     if confirmed_exercise is None and forced_exercise is None:
                         det_proba = detector["model"].predict_proba([feat_det])[0]
                         det_label = detector["encoder"].inverse_transform(
@@ -440,7 +485,7 @@ def ai_loop(models):
                             state["detection_pct"] = det_pct
                             state["exercise"]      = None
 
-                    # form feedback and rep counting 
+                    # ── Form feedback + rep counting ──────────────────────
                     elif confirmed_exercise in models:
 
                         # ── Rep counting ──
@@ -451,9 +496,9 @@ def ai_loop(models):
                             plank_timer.start()
                             current_hold_time = plank_timer.get()
                         elif rep_counter is not None:
-                            current_reps = rep_counter.update(kp, conf)
+                            current_reps = rep_counter.update(kp, conf)  # raw kp for rep counting
 
-                        # form feedback
+                        # ── Form feedback ──
                         form_data  = models[confirmed_exercise]
                         proba      = form_data["model"].predict_proba([feat_form])[0]
                         pred_idx   = proba.argmax()
@@ -513,8 +558,9 @@ def _make_counter(exercise, plank_timer):
     return RepCounter(exercise)
 
 
-# flask app
-
+# ─────────────────────────────────────────────
+#  FLASK APP
+# ─────────────────────────────────────────────
 
 app = Flask(__name__)
 
@@ -575,7 +621,9 @@ def force_exercise():
     return jsonify({"ok": True, "exercise": exercise})
 
 
-# entry point
+# ─────────────────────────────────────────────
+#  ENTRY POINT
+# ─────────────────────────────────────────────
 
 if __name__ == "__main__":
     print("\n Loading models...")

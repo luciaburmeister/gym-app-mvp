@@ -45,7 +45,7 @@ feature_cols = [
     "left_elbow_angle", "right_elbow_angle"
 ]
 
-# ── RUN PCA PER EXERCISE ─────────────────────────────────────────────────────
+#  RUN PCA PER EXERCISE 
 
 exercises = ["squat", "lunge", "pushup", "plank"]
 
